@@ -3,6 +3,8 @@ Main entry point for the Active Wind Wall Control System.
 Orchestrates Process A (flight_loop) and Process B (GUI dashboard).
 """
 
+import multiprocessing
+multiprocessing.set_start_method('fork', force=True)
 import sys
 import signal
 import multiprocessing as mp
@@ -10,9 +12,10 @@ from multiprocessing import Process, Event
 import time
 
 from config import NUM_MOTORS
-from src.core import MotorStateBuffer, flight_loop
+from src.core import MotorStateBuffer
+from src.core.flight_loop import flight_loop
 from src.gui import launch_dashboard
-
+from src.gui import launch_dashboard
 
 def main() -> None:
     """
@@ -22,9 +25,6 @@ def main() -> None:
     print("="*70)
     print("Active Wind Wall Control System v0.1")
     print("="*70)
-    
-    # Set multiprocessing start method to 'spawn' for macOS compatibility
-    mp.set_start_method('spawn', force=True)
     
     # Create stop event for clean shutdown
     stop_event = Event()
@@ -102,6 +102,10 @@ def main() -> None:
         shared_buffer.unlink()
         print("[Main] All processes terminated")
         print("="*70)
+
+    print("[Main] Launching GUI dashboard...")
+    launch_dashboard()
+    print("[Main] GUI closed, exiting")
 
 
 if __name__ == '__main__':
