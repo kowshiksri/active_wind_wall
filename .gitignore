@@ -1,2 +1,3 @@
 /logs
-test*.py
+test_signal.py
+test_sine_signal.py
