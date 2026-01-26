@@ -68,6 +68,48 @@ def generate_uniform(
     return coeffs
 
 
+def generate_sine_wave(
+    n_motors: int = NUM_MOTORS,
+    amplitude: float = 1.0,
+    period: float = 1.0,
+    dc_offset: float = 0.5,
+    n_terms: int = FOURIER_TERMS,
+    base_freq: float = BASE_FREQUENCY
+) -> np.ndarray:
+    """
+    Generate Fourier coefficients for a sine wave.
+    For a sine wave, only the fundamental frequency has non-zero coefficient.
+    
+    signal(t) = dc_offset + amplitude * sin(2π*t/period)
+    
+    Args:
+        n_motors: Number of motors (all get same coefficients)
+        amplitude: Amplitude around DC offset (0 to 0.5 typical)
+        period: Period in seconds
+        dc_offset: Vertical offset (0.5 keeps signal in [0, 1])
+        n_terms: Number of Fourier terms (only first 2 matter for sine)
+        base_freq: Base frequency in Hz (1/period)
+    
+    Returns:
+        Coefficient matrix [n_motors, n_terms]
+    """
+    coeffs = np.zeros((n_motors, n_terms))
+    
+    # For a sine wave decomposition:
+    # Harmonic 0 (DC): dc_offset
+    # Harmonic 1 (fundamental): amplitude (for sine basis)
+    # All higher harmonics: 0
+    
+    # Store DC offset in first column
+    coeffs[:, 0] = dc_offset
+    
+    # Store fundamental sine amplitude in second column (if space available)
+    if n_terms > 1:
+        coeffs[:, 1] = amplitude
+    
+    return coeffs
+
+
 def generate_custom(
     coefficients: np.ndarray
 ) -> np.ndarray:
@@ -83,4 +125,4 @@ def generate_custom(
     return coefficients.astype(np.float64)
 
 
-__all__ = ['generate_square_pulse', 'generate_uniform', 'generate_custom']
+__all__ = ['generate_square_pulse', 'generate_uniform', 'generate_sine_wave', 'generate_custom']

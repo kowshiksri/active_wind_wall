@@ -15,7 +15,7 @@ from src.physics import SignalGenerator
 from src.core import MotorStateBuffer
 
 
-def flight_loop(stop_event: Event, use_mock_hardware: bool = True, fourier_coeffs: np.ndarray = None) -> None:
+def flight_loop(stop_event: Event, use_mock_hardware: bool = True, fourier_coeffs: np.ndarray = None) -> None: # type: ignore
     """
     Main flight control loop running at 400 Hz.
     
