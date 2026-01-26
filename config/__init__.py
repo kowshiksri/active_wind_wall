@@ -16,8 +16,8 @@ PWM_CENTER: int = (PWM_MIN + PWM_MAX) // 2  # 1500 µs neutral point
 SLEW_LIMIT: int = 50  # Maximum PWM change per loop tick (units/tick)
 
 # Signal Synthesis
-HARMONICS: list = [1, 3, 5, 7]  # Odd harmonics for square wave synthesis
-BASE_FREQUENCY: float = 1.0  # Hz (can be modulated)
+FOURIER_TERMS: int = 7  # Number of Fourier coefficients per motor
+BASE_FREQUENCY: float = 1.0  # Hz (base frequency for periodic signals)
 
 # Visualization Parameters
 GUI_UPDATE_RATE_FPS: int = 60
@@ -25,4 +25,4 @@ LOG_INTERVAL_MS: int = 100
 
 # Shared Memory
 SHARED_MEM_NAME: str = "aww_control_buffer"
-SHARED_MEM_SIZE: int = 36 * 2 * 8  # 36 motors * 2 channels (PWM, RPM) * 8 bytes (float64)
+SHARED_MEM_SIZE: int = 36 * 8  # 36 motors * PWM values * 8 bytes (float64)

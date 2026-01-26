@@ -4,7 +4,6 @@ Detects OS and provides real or mock hardware interfaces.
 """
 
 import platform
-import time
 from typing import List, Optional
 import numpy as np
 
@@ -16,19 +15,14 @@ class MockSPI:
         """Initialize the mock SPI interface."""
         self.frame_count = 0
     
-    def xfer3(self, pwm_values: List[int]) -> List[int]:
+    def xfer3(self, pwm_values: List[int]) -> None:
         """
-        Simulate SPI transfer with dummy RPM telemetry.
+        Simulate SPI transfer (one-way, PWM only).
         
         Args:
             pwm_values: List of 36 PWM values (1000-2000)
-        
-        Returns:
-            List of dummy RPM values (all zeros for now)
         """
         self.frame_count += 1
-        # Return dummy RPM telemetry (36 zeros)
-        return [0] * 36
     
     def close(self) -> None:
         """Close the mock SPI interface."""
@@ -67,18 +61,15 @@ class RealSPI:
         self.spi.open(bus, device)
         self.spi.max_speed_hz = 1000000  # 1 MHz
     
-    def xfer3(self, pwm_values: List[int]) -> List[int]:
+    def xfer3(self, pwm_values: List[int]) -> None:
         """
-        Transfer PWM values via SPI and receive telemetry.
+        Transfer PWM values via SPI (one-way, PWM only).
         
         Args:
             pwm_values: List of 36 PWM values
-        
-        Returns:
-            List of 36 RPM telemetry values
         """
         # Convert PWM values to bytes and transfer
-        return self.spi.xfer3(pwm_values)
+        self.spi.xfer3(pwm_values)
     
     def close(self) -> None:
         """Close the SPI interface."""
@@ -147,25 +138,19 @@ class HardwareInterface:
                 self.spi = MockSPI()
                 self.gpio = MockGPIO()
     
-    def send_pwm(self, pwm_values: np.ndarray) -> np.ndarray:
+    def send_pwm(self, pwm_values: np.ndarray) -> None:
         """
-        Send PWM values to motors and receive telemetry.
+        Send PWM values to motors (one-way, PWM only).
         
         Args:
             pwm_values: numpy array of shape (36,) with PWM values (1000-2000)
-        
-        Returns:
-            numpy array of shape (36,) with RPM telemetry
         """
         # Convert to list and send via SPI
         pwm_list = pwm_values.astype(int).tolist()
-        rpm_list = self.spi.xfer3(pwm_list)
+        self.spi.xfer3(pwm_list)
         
         # Toggle sync pin
         self.gpio.toggle_sync_pin()
-        
-        # Return as numpy array
-        return np.array(rpm_list, dtype=np.float64)
     
     def close(self) -> None:
         """Close hardware interfaces."""

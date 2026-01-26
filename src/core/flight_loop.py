@@ -15,12 +15,12 @@ from src.physics import SignalGenerator
 from src.core import MotorStateBuffer
 
 
-def flight_loop(stop_event: Event, use_mock_hardware: bool = True) -> None:
+def flight_loop(stop_event: Event, use_mock_hardware: bool = True, fourier_coeffs: np.ndarray = None) -> None:
     """
     Main flight control loop running at 400 Hz.
     
     This function runs in a separate Process and:
-    1. Generates physics-based motor signals (Fourier synthesis)
+    1. Reconstructs motor signals from Fourier coefficients
     2. Applies safety constraints (slew rate limiting, PWM clamping)
     3. Sends commands to hardware via SPI
     4. Reads telemetry from hardware
@@ -30,6 +30,7 @@ def flight_loop(stop_event: Event, use_mock_hardware: bool = True) -> None:
     Args:
         stop_event: multiprocessing.Event to signal loop termination
         use_mock_hardware: If True, use mock drivers; if False, use real drivers
+        fourier_coeffs: Coefficient matrix [n_motors, n_terms] for signal generation
     """
     print(f"[FlightLoop] Initializing at {UPDATE_RATE_HZ} Hz ({LOOP_TIME_MS:.2f} ms)")
     
@@ -37,8 +38,10 @@ def flight_loop(stop_event: Event, use_mock_hardware: bool = True) -> None:
         # Initialize hardware interface with platform detection
         hardware = HardwareInterface(use_mock=use_mock_hardware)
         
-        # Initialize physics engine
-        signal_gen = SignalGenerator()
+        # Initialize physics engine with coefficient matrix
+        if fourier_coeffs is None:
+            raise ValueError("fourier_coeffs must be provided to flight_loop")
+        signal_gen = SignalGenerator(fourier_coeffs)
         
         # Attach to shared memory buffer
         shared_buffer = MotorStateBuffer(create=False)
@@ -73,12 +76,11 @@ def flight_loop(stop_event: Event, use_mock_hardware: bool = True) -> None:
             # Final clamp to valid PWM range
             pwm_safe = np.clip(pwm_safe, PWM_MIN, PWM_MAX)
             
-            # --- Step 4: Send to hardware and receive telemetry ---
-            rpm_telemetry = hardware.send_pwm(pwm_safe)
+            # --- Step 4: Send to hardware ---
+            hardware.send_pwm(pwm_safe)
             
             # --- Step 5: Update shared memory ---
             shared_buffer.set_pwm(pwm_safe)
-            shared_buffer.set_rpm(rpm_telemetry)
             
             # --- Step 6: Update state for next iteration ---
             previous_pwm = pwm_safe

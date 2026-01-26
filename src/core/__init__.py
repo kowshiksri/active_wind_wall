@@ -11,12 +11,11 @@ from config import NUM_MOTORS, SHARED_MEM_NAME
 
 class MotorStateBuffer:
     """
-    Manages a shared memory buffer for motor PWM and telemetry data.
+    Manages a shared memory buffer for motor PWM commands.
     
     Structure:
-    - Shape: (36, 2)
-    - Column 0: Target PWM values (1000-2000)
-    - Column 1: Telemetry RPM values
+    - Shape: (36,)
+    - Values: Target PWM values (1000-2000)
     """
     
     def __init__(self, create: bool = True):
@@ -27,7 +26,7 @@ class MotorStateBuffer:
             create: If True, create new buffer; if False, attach to existing
         """
         self.name = SHARED_MEM_NAME
-        self.shape = (NUM_MOTORS, 2)
+        self.shape = (NUM_MOTORS,)
         self.dtype = np.float64
         
         try:
@@ -44,7 +43,7 @@ class MotorStateBuffer:
                 self.shm = shared_memory.SharedMemory(
                     name=self.name,
                     create=True,
-                    size=NUM_MOTORS * 2 * 8  # 36 * 2 * 8 bytes (float64)
+                    size=NUM_MOTORS * 8  # 36 * 8 bytes (float64)
                 )
                 self.array = np.ndarray(self.shape, dtype=self.dtype, buffer=self.shm.buf)
                 self.array[:] = 0.0
@@ -66,16 +65,7 @@ class MotorStateBuffer:
         Args:
             pwm_values: numpy array of shape (36,) with PWM values
         """
-        self.array[:, 0] = pwm_values
-    
-    def set_rpm(self, rpm_values: np.ndarray) -> None:
-        """
-        Update RPM telemetry in shared memory.
-        
-        Args:
-            rpm_values: numpy array of shape (36,) with RPM values
-        """
-        self.array[:, 1] = rpm_values
+        self.array[:] = pwm_values
     
     def get_pwm(self) -> np.ndarray:
         """
@@ -83,24 +73,6 @@ class MotorStateBuffer:
         
         Returns:
             numpy array of shape (36,) with current PWM values
-        """
-        return self.array[:, 0].copy()
-    
-    def get_rpm(self) -> np.ndarray:
-        """
-        Read RPM telemetry from shared memory.
-        
-        Returns:
-            numpy array of shape (36,) with current RPM values
-        """
-        return self.array[:, 1].copy()
-    
-    def get_all(self) -> np.ndarray:
-        """
-        Read all data from shared memory.
-        
-        Returns:
-            numpy array of shape (36, 2) with [PWM, RPM] for each motor
         """
         return self.array.copy()
     

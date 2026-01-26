@@ -1,35 +1,50 @@
 """
 Main entry point for the Active Wind Wall Control System.
-Orchestrates Process A (flight_loop) and Process B (GUI dashboard).
+Launches flight_loop process and waits for termination.
 """
 
 import multiprocessing
 multiprocessing.set_start_method('fork', force=True)
 import sys
 import signal
-import multiprocessing as mp
-from multiprocessing import Process, Event
 import time
+import numpy as np
 
 from config import NUM_MOTORS
 from src.core import MotorStateBuffer
 from src.core.flight_loop import flight_loop
-from src.gui import launch_dashboard
-from src.gui import launch_dashboard
+from src.physics.signal_designer import generate_square_pulse
 
-def main() -> None:
+
+def main(fourier_coeffs: np.ndarray = None) -> None:
     """
     Main entry point.
-    Sets up multiprocessing, initializes shared memory, and launches processes.
+    Sets up multiprocessing, initializes shared memory, and launches flight_loop.
+    
+    Args:
+        fourier_coeffs: Pre-computed Fourier coefficient matrix [n_motors, n_terms]
+                       If None, generates default square wave pattern
     """
     print("="*70)
     print("Active Wind Wall Control System v0.1")
     print("="*70)
     
-    # Create stop event for clean shutdown
-    stop_event = Event()
+    # Generate default coefficients if none provided
+    if fourier_coeffs is None:
+        print("[Main] Generating default square wave pattern...")
+        fourier_coeffs = generate_square_pulse(
+            n_motors=NUM_MOTORS,
+            amplitude=1.0,
+            period=10.0,
+            duty_cycle=0.5
+        )
     
-    # Initialize shared memory (Process A will attach, Process B will attach)
+    print(f"[Main] Signal shape: {fourier_coeffs.shape}")
+    
+    # Create stop event for clean shutdown
+    stop_event = multiprocessing.Event()
+    
+    # Initialize shared memory
     print("[Main] Initializing shared memory buffer...")
     try:
         shared_buffer = MotorStateBuffer(create=True)
@@ -45,11 +60,11 @@ def main() -> None:
     print(f"[Main] Platform: {platform.system()}")
     print(f"[Main] Hardware mode: {'MOCK (macOS)' if use_mock else 'REAL (Linux/RPi)'}")
     
-    # Launch flight control process (Process A)
+    # Launch flight control process
     print("[Main] Launching flight_loop process...")
-    flight_process = Process(
+    flight_process = multiprocessing.Process(
         target=flight_loop,
-        args=(stop_event, use_mock),
+        args=(stop_event, use_mock, fourier_coeffs),
         name="FlightLoop",
         daemon=False
     )
@@ -63,28 +78,21 @@ def main() -> None:
         shared_buffer.unlink()
         sys.exit(1)
     
-    # Launch GUI (Process B in main thread)
-    print("[Main] Launching GUI dashboard...")
+    print("[Main] Flight loop running. Press Ctrl+C to stop.")
+    
     try:
         # Handle Ctrl+C gracefully
         def signal_handler(sig, frame):
             print("\n[Main] Ctrl+C detected, shutting down...")
             stop_event.set()
-            flight_process.join(timeout=2)
-            if flight_process.is_alive():
-                flight_process.terminate()
-                flight_process.join()
-            shared_buffer.unlink()
-            print("[Main] Shutdown complete")
-            sys.exit(0)
         
         signal.signal(signal.SIGINT, signal_handler)
         
-        # Start GUI (blocks until window closes)
-        launch_dashboard()
+        # Wait for process to finish
+        flight_process.join()
     
     except Exception as e:
-        print(f"[Main] GUI error: {e}")
+        print(f"[Main] Error: {e}")
     
     finally:
         # Cleanup
@@ -102,10 +110,6 @@ def main() -> None:
         shared_buffer.unlink()
         print("[Main] All processes terminated")
         print("="*70)
-
-    print("[Main] Launching GUI dashboard...")
-    launch_dashboard()
-    print("[Main] GUI closed, exiting")
 
 
 if __name__ == '__main__':
