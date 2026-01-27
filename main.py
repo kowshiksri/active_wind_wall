@@ -10,13 +10,25 @@ import signal
 import time
 import numpy as np
 
-from config import NUM_MOTORS
+from config import (
+    NUM_MOTORS,
+    BASE_FREQUENCY,
+    EXPERIMENT_DURATION_S,
+    SIGNAL_MIN_DEFAULT,
+    SIGNAL_MAX_DEFAULT,
+)
 from src.core import MotorStateBuffer
 from src.core.flight_loop import flight_loop
 from src.physics.signal_designer import generate_square_pulse
 
 
-def main(fourier_coeffs: np.ndarray = None) -> None:
+def main(
+    fourier_coeffs: np.ndarray | None = None,
+    experiment_duration_s: float | None = EXPERIMENT_DURATION_S,
+    start_delay_s: float = 0.0,
+    value_min: float = SIGNAL_MIN_DEFAULT,
+    value_max: float = SIGNAL_MAX_DEFAULT,
+) -> None:
     """
     Main entry point.
     Sets up multiprocessing, initializes shared memory, and launches flight_loop.
@@ -64,7 +76,7 @@ def main(fourier_coeffs: np.ndarray = None) -> None:
     print("[Main] Launching flight_loop process...")
     flight_process = multiprocessing.Process(
         target=flight_loop,
-        args=(stop_event, use_mock, fourier_coeffs),
+        args=(stop_event, use_mock, fourier_coeffs, BASE_FREQUENCY, None, start_delay_s, value_min, value_max),
         name="FlightLoop",
         daemon=False
     )
@@ -79,6 +91,7 @@ def main(fourier_coeffs: np.ndarray = None) -> None:
         sys.exit(1)
     
     print("[Main] Flight loop running. Press Ctrl+C to stop.")
+    start_wall = time.perf_counter()
     
     try:
         # Handle Ctrl+C gracefully
@@ -88,8 +101,20 @@ def main(fourier_coeffs: np.ndarray = None) -> None:
         
         signal.signal(signal.SIGINT, signal_handler)
         
-        # Wait for process to finish
-        flight_process.join()
+        # Monitor for duration or manual stop
+        while flight_process.is_alive():
+            time.sleep(0.1)
+            if stop_event.is_set():
+                break
+            if experiment_duration_s is not None:
+                elapsed = time.perf_counter() - start_wall
+                if elapsed >= experiment_duration_s:
+                    print(f"[Main] Experiment duration reached ({experiment_duration_s}s); stopping...")
+                    stop_event.set()
+                    break
+        
+        # Ensure process exits
+        flight_process.join(timeout=2)
     
     except Exception as e:
         print(f"[Main] Error: {e}")

@@ -18,6 +18,11 @@ SLEW_LIMIT: int = 50  # Maximum PWM change per loop tick (units/tick)
 # Signal Synthesis
 FOURIER_TERMS: int = 7  # Number of Fourier coefficients per motor
 BASE_FREQUENCY: float = 1.0  # Hz (base frequency for periodic signals)
+# Optional per-experiment defaults
+EXPERIMENT_DURATION_S: float = 10.0  # Default run length; can be overridden per run
+# Normalized signal bounds (can be narrowed per experiment; never remapped)
+SIGNAL_MIN_DEFAULT: float = 0.0
+SIGNAL_MAX_DEFAULT: float = 1.0
 
 # Visualization Parameters
 GUI_UPDATE_RATE_FPS: int = 60

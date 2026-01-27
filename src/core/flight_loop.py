@@ -8,14 +8,24 @@ import numpy as np
 from multiprocessing import Event
 from config import (
     NUM_MOTORS, UPDATE_RATE_HZ, PWM_MIN, PWM_MAX, PWM_CENTER,
-    SLEW_LIMIT, LOOP_TIME_MS
+    SLEW_LIMIT, LOOP_TIME_MS, BASE_FREQUENCY,
+    SIGNAL_MIN_DEFAULT, SIGNAL_MAX_DEFAULT
 )
 from src.hardware import HardwareInterface
 from src.physics import SignalGenerator
 from src.core import MotorStateBuffer
 
 
-def flight_loop(stop_event: Event, use_mock_hardware: bool = True, fourier_coeffs: np.ndarray = None) -> None: # type: ignore
+def flight_loop(
+    stop_event: Event, # type: ignore
+    use_mock_hardware: bool = True,
+    fourier_coeffs: np.ndarray | None = None,
+    base_freq: float | None = None,
+    phase_radians: np.ndarray | None = None,
+    start_time_offset: float = 0.0,
+    value_min: float | None = None,
+    value_max: float | None = None,
+) -> None: # type: ignore
     """
     Main flight control loop running at 400 Hz.
     
@@ -38,10 +48,17 @@ def flight_loop(stop_event: Event, use_mock_hardware: bool = True, fourier_coeff
         # Initialize hardware interface with platform detection
         hardware = HardwareInterface(use_mock=use_mock_hardware)
         
-        # Initialize physics engine with coefficient matrix
+        # Initialize physics engine with coefficient matrix and timing/phase options
         if fourier_coeffs is None:
             raise ValueError("fourier_coeffs must be provided to flight_loop")
-        signal_gen = SignalGenerator(fourier_coeffs)
+        signal_gen = SignalGenerator(
+            fourier_coeffs,
+            base_freq=base_freq if base_freq is not None else BASE_FREQUENCY,
+            phase_radians=phase_radians,
+            start_time_offset=start_time_offset,
+            value_min=value_min if value_min is not None else SIGNAL_MIN_DEFAULT,
+            value_max=value_max if value_max is not None else SIGNAL_MAX_DEFAULT,
+        )
         
         # Attach to shared memory buffer
         shared_buffer = MotorStateBuffer(create=False)
