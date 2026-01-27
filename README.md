@@ -1,103 +1,52 @@
-# Active Wind Wall Control System v0.1
+# Active Wind Wall Control System
 
-A high-performance embedded control system for a 36-motor Active Wind Wall using **Python multiprocessing**, **shared memory**, and **real-time signal synthesis**.
+A real-time control system for a 36-motor Active Wind Wall that generates time-varying flow patterns using Fourier-based signal synthesis.
 
-## Architecture
+## What This Code Does
 
-### Process A: Flight Control Loop (400 Hz)
-- Runs in a dedicated `multiprocessing.Process`
-- **Physics Engine:** Fourier-synthesized square wave generation
-- **Safety Layer:** Slew-rate limiting and PWM clamping
-- **Hardware Interface:** Platform-aware drivers (mock on macOS, real on Linux/RPi)
-- **Deterministic Timing:** Spinlock-based loop for exact 2.5 ms tick rate
+This system controls 36 motors (arranged in a 6×6 grid) to create precise airflow patterns. It:
 
-### Process B: GUI Dashboard (60 FPS)
-- PyQt6 + PyqtGraph real-time visualization
-- Two scrolling plots: Physics signal and actual PWM commands
-- CSV logging at 10 Hz (100 ms intervals)
-- Shared memory attachment for zero-copy data access
+1. **Generates Signals** - Creates motor control signals using Fourier series (sine waves, square pulses, etc.)
+2. **Runs Control Loop** - Executes a high-speed loop at 400 Hz (every 2.5 ms) to update all motors
+3. **Ensures Safety** - Applies limits on how fast motors can change speed (slew-rate limiting)
+4. **Sends Commands** - Communicates with motor controllers using PWM signals (1000-2000 microseconds)
+5. **Logs Data** - Records all motor states to CSV files for analysis
 
-### Cross-Platform Hardware Abstraction
-```
-Darwin (macOS)  → MockSPI + MockGPIO (debugging)
-Linux (RPi 5)   → Real spidev + lgpio drivers
-```
+## How It Works
+
+The system uses **Fourier coefficients** to pre-compute signal patterns. During operation:
+- The `flight_loop` reconstructs motor signals in real-time from these coefficients
+- Each motor receives PWM commands that are safely limited and validated
+- Hardware abstraction allows the code to run on macOS (for testing) or Linux (for real hardware)
 
 ## Project Structure
 
 ```
 active_wind_wall/
-├── main.py                      # Entry point & process orchestration
-├── requirements.txt             # Dependencies
-├── config/
-│   └── settings.py             # Global constants (36 motors, 400 Hz, etc)
+├── main.py                          # Start here - launches the control loop
+├── requirements.txt                 # Python dependencies
+├── config/                          # Configuration settings
+│   └── __init__.py                 # Motor count, frequencies, PWM limits
 ├── src/
-│   ├── hardware/               # Hardware Abstraction Layer
-│   │   └── interface.py        # SPI/GPIO (real vs mock)
-│   ├── physics/                # Layer 3: Math & Signal Generation
-│   │   └── signal_gen.py       # Fourier synthesis logic
-│   ├── core/                   # Layer 2: Control Engine
-│   │   ├── shared_mem.py       # Shared memory wrapper
-│   │   └── flight_loop.py      # 400 Hz control loop
-│   └── gui/                    # Visualization & Logging
-│       └── dashboard.py        # PyQt6 dashboard
-└── logs/
-    └── flight_log_YYYYMMDD_HHMMSS.csv
+│   ├── core/
+│   │   └── flight_loop.py          # Main control loop (400 Hz)
+│   ├── hardware/
+│   │   └── interface.py            # Hardware drivers (real or mock)
+│   └── physics/
+│       └── signal_designer.py      # Pre-compute Fourier coefficients
+└── logs/                            # Recorded flight data (CSV)
 ```
 
-## Configuration
+## Quick Start
 
-Edit [config/settings.py](config/settings.py):
-
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| `NUM_MOTORS` | 36 | 6×6 grid of ESCs |
-| `UPDATE_RATE_HZ` | 400 | 2.5 ms per tick |
-| `PWM_MIN` / `PWM_MAX` | 1000 / 2000 | µs pulse width |
-| `SLEW_LIMIT` | 50 | Safety: max PWM change/tick |
-| `HARMONICS` | [1,3,5,7] | Odd harmonics for square wave |
-| `BASE_FREQUENCY` | 1.0 | Signal frequency (Hz) |
-
-## Physics Engine
-
-### Fourier Square Wave Synthesis
-
-The signal generator creates a synthetic square wave by summing odd harmonics:
-
-$$\text{Signal}(t) = \sum_{n \in \{1,3,5,7\}} \frac{1}{n} \sin(2\pi \cdot n \cdot f \cdot t)$$
-
-**Properties:**
-- Input: time `t` (seconds)
-- Output: normalized array of shape (36,) with values ∈ [0.0, 1.0]
-- Vectorized computation (numpy, no Python loops)
-- Deterministic and repeatable
-
-### Signal-to-PWM Mapping
-
-```python
-# Physics output: 0.0 to 1.0
-signal = sg.get_flow_field(t)
-
-# Map to PWM range: 1000 to 2000 µs
-pwm_target = 1000 + signal * 1000
-
-# Apply safety slew-rate limiting
-pwm_delta = np.clip(pwm_target - prev_pwm, -50, +50)
-pwm_safe = prev_pwm + pwm_delta
-
-# Final clamp
-pwm_final = np.clip(pwm_safe, 1000, 2000)
-```
-
-## Installation
-
-### macOS (Development)
+### Installation
 
 ```bash
-# Install Python 3.8+
-python3 --version
+# Clone or download this repository
+cd active_wind_wall
 
-# Create virtual environment
+# Install dependencies
+pip install -r requirements.txt
 python3 -m venv venv
 source venv/bin/activate
 
@@ -125,134 +74,71 @@ sudo usermod -a -G spi,gpio $(whoami)
 
 ## Usage
 
-### Run on macOS (Mock Hardware)
+### Run the System
 
 ```bash
-cd active_wind_wall
-python3 main.py
+python main.py
 ```
 
-**What you'll see:**
-- Flight loop logs at 100-frame intervals (250 ms)
-- PyQt6 window opens with real-time plots
-- CSV logs created in `logs/` directory
-- Hardware detection: "Running on Darwin with MOCK drivers"
-
-### Run on Raspberry Pi (Real Hardware)
-
-```bash
-cd active_wind_wall
-python3 main.py
-```
-
-**Same interface, but now:**
-- Actual SPI communication with motor controllers
-- GPIO sync pin toggled every 100 frames
-- CSV logs identical format for cross-platform analysis
+The system will:
+- Generate default square wave pattern (10-second period)
+- Launch the control loop running at 400 Hz
+- Create CSV log files in the `logs/` folder
+- Automatically detect your platform (macOS uses mock hardware, Linux uses real hardware)
 
 ### Stop the System
 
-- **GUI window close button** → Clean shutdown
-- **Ctrl+C in terminal** → Signal handler catches SIGINT
+Press `Ctrl+C` to stop the program. It will shut down gracefully and save all log data.
 
-**Cleanup:**
-- Flight process terminates
-- Shared memory unlinked automatically
-- CSV logs saved with full data history
+## Configuration
 
-## Shared Memory Protocol
+Key settings are in [config/__init__.py](config/__init__.py):
 
-Inter-process communication via `multiprocessing.SharedMemory`:
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `NUM_MOTORS` | 36 | Number of motors in the grid |
+| `UPDATE_RATE_HZ` | 400 | Control loop frequency (400 Hz = 2.5 ms) |
+| `PWM_MIN` / `PWM_MAX` | 1000 / 2000 | PWM pulse width range (microseconds) |
+| `SLEW_LIMIT` | 50 | Max PWM change per update (safety feature) |
+| `FOURIER_TERMS` | 20 | Number of Fourier terms for signal reconstruction |
 
-```python
-Buffer Shape: (36, 2)  # 36 motors × 2 channels
+## Signal Design
 
-Column 0: Target PWM values (1000-2000)
-Column 1: Telemetry RPM from hardware
-```
+The system uses Fourier series to generate smooth, repeatable motor patterns. You can create different signal types in [src/physics/signal_designer.py](src/physics/signal_designer.py):
 
-**Process A (Flight Loop):** Writes PWM + reads RPM telemetry  
-**Process B (GUI):** Reads PWM + RPM for visualization  
-**Zero-copy performance:** Direct numpy array access
+- **Square Pulse** - On/off pattern (default)
+- **Sine Wave** - Smooth oscillation
+- **Uniform** - Constant speed for all motors
 
-## Logging Format
+Each signal is pre-computed as Fourier coefficients, then reconstructed in real-time during the control loop.
 
-CSV files in `logs/flight_log_YYYYMMDD_HHMMSS.csv`:
+## Data Logging
 
-```csv
-timestamp,pwm_0,pwm_1,...,pwm_35,rpm_0,rpm_1,...,rpm_35
-2026-01-25T14:32:11.123456,1500,1501,1499,...,1502,0,0,...,0
-2026-01-25T14:32:11.223456,1502,1501,1500,...,1501,0,0,...,0
-...
-```
+Flight data is automatically saved to `logs/flight_log_YYYYMMDD_HHMMSS.csv` with:
+- Timestamp for each update
+- PWM values for all 36 motors
+- RPM telemetry (when using real hardware)
 
-**Logging Rate:** 10 Hz (100 ms intervals)  
-**Data Rate:** ~3 KB per log entry  
-**Typical Session:** ~100-200 MB for 10 minutes
+Log files can be analyzed using the test notebooks in the `tests/` folder.
 
-## Code Quality
+## Platform Support
 
-✓ **Type Hints:** Every function annotated  
-✓ **Docstrings:** Google-style for all classes/methods  
-✓ **NumPy Optimization:** Vectorized operations, no Python loops  
-✓ **Error Handling:** Graceful fallbacks and informative messages  
-✓ **Cross-Platform:** Automatic OS detection and driver selection  
+- **macOS**: Development mode with mock hardware (prints to console, no actual motor control)
+- **Linux/Raspberry Pi**: Production mode with real SPI/GPIO communication to motor controllers
 
-## Debugging
+The code automatically detects which platform you're running on.
 
-### Enable Verbose Output
+## Need Help?
 
-Edit [main.py](main.py) and add:
+- Check the code comments - every function has documentation
+- Look at log files in the `logs/` folder to see what the system is doing
+- Run tests in the `tests/` folder to verify signal generation
 
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
+## Technical Details
 
-### Monitor Shared Memory
+For those interested in the implementation:
 
-In a separate terminal:
-
-```bash
-python3 -c "
-import sys
-sys.path.insert(0, '.')
-from src.core import MotorStateBuffer
-import numpy as np
-
-buffer = MotorStateBuffer(create=False)
-while True:
-    pwm = buffer.get_pwm()
-    print(f'PWM: min={pwm.min():.0f} max={pwm.max():.0f} mean={pwm.mean():.0f}')
-    time.sleep(0.1)
-"
-```
-
-### Profile CPU Usage
-
-```bash
-# macOS
-python3 -m cProfile -s cumulative main.py
-
-# Linux
-perf record -F 99 python3 main.py
-perf report
-```
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| `ModuleNotFoundError: No module named 'numpy'` | `pip install -r requirements.txt` |
-| `AttributeError: 'SharedMemory' object has no attribute 'buffer'` | Requires Python 3.9+ (fixed in v0.1) |
-| GUI window doesn't open | Check `DISPLAY` variable on headless systems |
-| SPI permission denied (Raspberry Pi) | Run with `sudo` or add user to `spi` group |
-| Flight loop stops after a few seconds | Check for exceptions in terminal output |
-
-## Performance Targets
-
-- **Control Loop:** 400 Hz ± 0.5 ms jitter (2.5 ms target)
-- **Physics:** <0.1 ms per update (vectorized numpy)
-- **GUI:** 60 FPS (PyQt event loop)
-- **Memory:** ~50 MB resident (shared memory + GUI buffers)
-- **CPU:** Single core at ~80% (spinlock) on RPi 5
+- **Fourier Synthesis**: Signals are pre-computed as coefficient matrices and reconstructed using `sin(2πft)` during flight
+- **Safety Features**: Slew-rate limiting prevents sudden motor speed changes
+- **Multiprocessing**: Uses Python's `multiprocessing` module with shared memory for efficient data sharing
+- **Hardware Abstraction**: Platform detection allows the same code to run on development machines and real hardware
