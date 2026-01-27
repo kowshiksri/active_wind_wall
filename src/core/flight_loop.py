@@ -24,12 +24,14 @@ def flight_loop(
     use_mock_hardware: bool = True,
     fourier_coeffs: np.ndarray | None = None,
     base_freq: float | None = None,
+    omega_per_motor: np.ndarray | None = None,
     phase_radians: np.ndarray | None = None,
     start_time_offset: float = 0.0,
     value_min: float | None = None,
     value_max: float | None = None,
     enable_logging: bool = True,
     log_interval_frames: int = 40,
+    slew_limit_override: float | None = None,
 ) -> None: # type: ignore
     """
     Main flight control loop running at 400 Hz.
@@ -66,6 +68,7 @@ def flight_loop(
         signal_gen = SignalGenerator(
             fourier_coeffs,
             base_freq=base_freq if base_freq is not None else BASE_FREQUENCY,
+            omega_per_motor=omega_per_motor,
             phase_radians=phase_radians,
             start_time_offset=start_time_offset,
             value_min=value_min if value_min is not None else SIGNAL_MIN_DEFAULT,
@@ -98,6 +101,7 @@ def flight_loop(
         
         # State tracking
         previous_pwm = np.full(NUM_MOTORS, PWM_CENTER, dtype=np.float64)
+        active_slew_limit = slew_limit_override if slew_limit_override is not None else SLEW_LIMIT
         frame_count = 0
         loop_start_time = time.perf_counter()
         
@@ -118,7 +122,7 @@ def flight_loop(
             pwm_delta = pwm_target - previous_pwm
             
             # Clamp delta to slew limit
-            pwm_delta_clamped = np.clip(pwm_delta, -SLEW_LIMIT, SLEW_LIMIT)
+            pwm_delta_clamped = np.clip(pwm_delta, -active_slew_limit, active_slew_limit)
             
             # Compute safe PWM
             pwm_safe = previous_pwm + pwm_delta_clamped

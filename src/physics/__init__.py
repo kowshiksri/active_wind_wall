@@ -14,6 +14,7 @@ class SignalGenerator:
         self,
         fourier_coeffs: np.ndarray,
         base_freq: float = BASE_FREQUENCY,
+        omega_per_motor: np.ndarray | None = None,
         phase_radians: np.ndarray | None = None,
         start_time_offset: float = 0.0,
         value_min: float = SIGNAL_MIN_DEFAULT,
@@ -34,6 +35,12 @@ class SignalGenerator:
         self.n_motors = self.coeffs.shape[0]
         self.n_terms = self.coeffs.shape[1] if len(self.coeffs.shape) > 1 else 1
         self.base_freq = base_freq
+        self.omega_per_motor = None
+        if omega_per_motor is not None:
+            arr = np.array(omega_per_motor, dtype=np.float64)
+            if arr.shape[0] != self.n_motors:
+                raise ValueError("omega_per_motor length must match number of motors")
+            self.omega_per_motor = arr
         self.omega = 2.0 * np.pi * base_freq
         self.start_time_offset = max(0.0, float(start_time_offset))
         self.value_min = float(value_min)
@@ -70,7 +77,10 @@ class SignalGenerator:
         # Add harmonic components (coefficients 1, 2, 3, ...)
         for n in range(1, self.n_terms):
             harmonic_order = n  # n=1 -> 1st harmonic, n=2 -> 2nd harmonic, etc.
-            phase = harmonic_order * self.omega * t_eff + self.phases[:, n]
+            if self.omega_per_motor is not None:
+                phase = harmonic_order * self.omega_per_motor * t_eff + self.phases[:, n]
+            else:
+                phase = harmonic_order * self.omega * t_eff + self.phases[:, n]
             signal += self.coeffs[:, n] * np.sin(phase)
         
         # Constrain to requested range without remapping full span to [0,1]

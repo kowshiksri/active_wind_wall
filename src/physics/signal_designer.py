@@ -18,37 +18,41 @@ def generate_square_pulse(
     """
     Generate Fourier coefficients for a square wave pulse.
     
+    NOTE: Currently optimized for 50% duty cycle (standard square wave).
+    For 50% duty: Only odd harmonics contribute, even harmonics are zero.
+    
     Fourier series: signal(t) = A₀ + Σ Aₙ * sin(n*2π*f*t)
-    For square wave: A₀ = amplitude * duty_cycle
-                     Aₙ = (2*amplitude/nπ) * sin(n*π*duty_cycle)
+    For 50% duty square wave:
+        A₀ = 0 (DC offset, will be set externally)
+        Aₙ = (4*amplitude/nπ) for odd n (1, 3, 5, 7, ...)
+        Aₙ = 0 for even n (2, 4, 6, 8, ...)
     
     Args:
         n_motors: Number of motors (all get same coefficients)
-        amplitude: Signal amplitude in [0, 1]
+        amplitude: Half the peak-to-peak amplitude (wave swings ±amplitude around DC)
         period: Period in seconds
-        duty_cycle: Fraction of period that is "on" (0.5 = 50%)
+        duty_cycle: Fraction of period that is "on" (0.5 = 50%) - currently only 0.5 supported
         n_terms: Number of Fourier terms
-        base_freq: Base frequency in Hz (1/period)
+        base_freq: Base frequency in Hz (1/period) - not used in coefficient calculation
     
     Returns:
         Coefficient matrix [n_motors, n_terms]
-        coeffs[:, 0] = DC offset
+        coeffs[:, 0] = DC offset (set to 0, GUI will override)
         coeffs[:, 1] = 1st harmonic amplitude
         coeffs[:, 2] = 2nd harmonic amplitude, etc.
     """
     coeffs = np.zeros((n_motors, n_terms))
     
-    # DC component (average value)
-    dc_offset = amplitude * duty_cycle
-    coeffs[:, 0] = dc_offset
+    # DC component - set to 0 here, GUI will set it to (high + low) / 2
+    coeffs[:, 0] = 0.0
     
-    # Harmonic components (n=1, 2, 3, ...)
+    # For 50% duty cycle square wave: only odd harmonics contribute
+    # Formula: coefficient = (4 * amplitude) / (n * π) for odd n
     for n in range(1, n_terms):
-        harmonic_order = n
-        # Fourier coefficient for square wave
-        sin_term = np.sin(harmonic_order * np.pi * duty_cycle)
-        a_n = (2.0 * amplitude / (harmonic_order * np.pi)) * sin_term
-        coeffs[:, n] = a_n
+        if n % 2 == 1:  # Odd harmonics only (1, 3, 5, 7, ...)
+            coeffs[:, n] = (4.0 * amplitude) / (n * np.pi)
+        else:  # Even harmonics are zero for 50% duty cycle
+            coeffs[:, n] = 0.0
     
     return coeffs
 

@@ -45,12 +45,24 @@ def main(
     # Generate default coefficients if none provided
     if fourier_coeffs is None:
         print("[Main] Generating default square wave pattern...")
+        default_period = 10.0
+        default_base_freq = 1.0 / default_period
+        # amplitude parameter is HALF the peak-to-peak range; 0.5 gives swing 0..1 after DC set
         fourier_coeffs = generate_square_pulse(
             n_motors=NUM_MOTORS,
-            amplitude=1.0,
-            period=10.0,
-            duty_cycle=0.5
+            amplitude=0.5,
+            period=default_period,
+            duty_cycle=0.5,
+            n_terms=7,
+            base_freq=default_base_freq,
         )
+        # Set DC to midpoint 0.5 so output spans [0,1]
+        fourier_coeffs[:, 0] = 0.5
+        # Per-motor omega array (all motors share the same default period here)
+        omega_per_motor = np.full(NUM_MOTORS, 2.0 * np.pi * default_base_freq, dtype=float)
+    else:
+        # If user provides coeffs, use uniform omega based on BASE_FREQUENCY
+        omega_per_motor = np.full(NUM_MOTORS, 2.0 * np.pi * BASE_FREQUENCY, dtype=float)
     
     print(f"[Main] Signal shape: {fourier_coeffs.shape}")
     
@@ -77,7 +89,7 @@ def main(
     print(f"[Main] Launching flight_loop process (logging={'ON' if enable_logging else 'OFF'})...")
     flight_process = multiprocessing.Process(
         target=flight_loop,
-        args=(stop_event, use_mock, fourier_coeffs, BASE_FREQUENCY, None, start_delay_s, value_min, value_max, enable_logging),
+        args=(stop_event, use_mock, fourier_coeffs, BASE_FREQUENCY, omega_per_motor, None, start_delay_s, value_min, value_max, enable_logging),
         name="FlightLoop",
         daemon=False
     )
