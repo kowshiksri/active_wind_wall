@@ -1,3 +1,6 @@
 /logs
-test_signal.py
-test_sine_signal.py
+/tests
+__pycache__/
+*.pyc
+.venv/
+.env
