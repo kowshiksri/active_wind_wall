@@ -28,6 +28,7 @@ def main(
     start_delay_s: float = 0.0,
     value_min: float = SIGNAL_MIN_DEFAULT,
     value_max: float = SIGNAL_MAX_DEFAULT,
+    enable_logging: bool = True,
 ) -> None:
     """
     Main entry point.
@@ -73,10 +74,10 @@ def main(
     print(f"[Main] Hardware mode: {'MOCK (macOS)' if use_mock else 'REAL (Linux/RPi)'}")
     
     # Launch flight control process
-    print("[Main] Launching flight_loop process...")
+    print(f"[Main] Launching flight_loop process (logging={'ON' if enable_logging else 'OFF'})...")
     flight_process = multiprocessing.Process(
         target=flight_loop,
-        args=(stop_event, use_mock, fourier_coeffs, BASE_FREQUENCY, None, start_delay_s, value_min, value_max),
+        args=(stop_event, use_mock, fourier_coeffs, BASE_FREQUENCY, None, start_delay_s, value_min, value_max, enable_logging),
         name="FlightLoop",
         daemon=False
     )

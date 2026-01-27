@@ -4,6 +4,9 @@ Runs at 400 Hz with deterministic timing and safety checks.
 """
 
 import time
+import csv
+from pathlib import Path
+from datetime import datetime
 import numpy as np
 from multiprocessing import Event
 from config import (
@@ -25,6 +28,8 @@ def flight_loop(
     start_time_offset: float = 0.0,
     value_min: float | None = None,
     value_max: float | None = None,
+    enable_logging: bool = True,
+    log_interval_frames: int = 40,
 ) -> None: # type: ignore
     """
     Main flight control loop running at 400 Hz.
@@ -41,6 +46,13 @@ def flight_loop(
         stop_event: multiprocessing.Event to signal loop termination
         use_mock_hardware: If True, use mock drivers; if False, use real drivers
         fourier_coeffs: Coefficient matrix [n_motors, n_terms] for signal generation
+        base_freq: Base frequency for signal generation
+        phase_radians: Phase offset for each motor
+        start_time_offset: Time offset to start signal generation
+        value_min: Minimum signal value
+        value_max: Maximum signal value
+        enable_logging: If True, log data to CSV file
+        log_interval_frames: Log every N frames (default 40 = 100ms at 400Hz)
     """
     print(f"[FlightLoop] Initializing at {UPDATE_RATE_HZ} Hz ({LOOP_TIME_MS:.2f} ms)")
     
@@ -62,6 +74,27 @@ def flight_loop(
         
         # Attach to shared memory buffer
         shared_buffer = MotorStateBuffer(create=False)
+        
+        # CSV logging setup
+        csv_file = None
+        csv_writer = None
+        if enable_logging:
+            log_dir = Path('logs')
+            log_dir.mkdir(exist_ok=True)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            csv_path = log_dir / f'flight_log_{timestamp}.csv'
+            csv_file = open(csv_path, 'w', newline='')
+            
+            # Create CSV header
+            header = ['timestamp']
+            header.extend([f'pwm_{i}' for i in range(NUM_MOTORS)])
+            header.extend([f'rpm_{i}' for i in range(NUM_MOTORS)])
+            
+            csv_writer = csv.writer(csv_file)
+            csv_writer.writerow(header)
+            print(f"[FlightLoop] Logging enabled: {csv_path}")
+        else:
+            print("[FlightLoop] Logging disabled")
         
         # State tracking
         previous_pwm = np.full(NUM_MOTORS, PWM_CENTER, dtype=np.float64)
@@ -99,10 +132,19 @@ def flight_loop(
             # --- Step 5: Update shared memory ---
             shared_buffer.set_pwm(pwm_safe)
             
-            # --- Step 6: Update state for next iteration ---
+            # --- Step 6: Log to CSV (if enabled) ---
+            if enable_logging and csv_writer and frame_count % log_interval_frames == 0:
+                timestamp = datetime.now().isoformat()
+                row = [timestamp]
+                row.extend(pwm_safe.tolist())
+                row.extend([0.0] * NUM_MOTORS)  # RPM placeholder (mock hardware)
+                csv_writer.writerow(row)
+                csv_file.flush()  # Ensure data is written
+            
+            # --- Step 7: Update state for next iteration ---
             previous_pwm = pwm_safe
             
-            # --- Step 7: Spinlock until exactly 2.5 ms has elapsed ---
+            # --- Step 8: Spinlock until exactly 2.5 ms has elapsed ---
             target_time = loop_start_time + (frame_count * LOOP_TIME_MS / 1000.0)
             while time.perf_counter() < target_time:
                 pass  # Busy-wait for deterministic timing
@@ -112,8 +154,9 @@ def flight_loop(
                 elapsed = time.perf_counter() - loop_start_time
                 actual_rate = frame_count / elapsed if elapsed > 0 else 0
                 avg_pwm = pwm_safe.mean()
+                log_status = "(logging)" if enable_logging else "(no log)"
                 print(f"[FlightLoop] Frame {frame_count:6d} | "
-                      f"Rate: {actual_rate:.1f} Hz | Avg PWM: {avg_pwm:.0f}")
+                      f"Rate: {actual_rate:.1f} Hz | Avg PWM: {avg_pwm:.0f} {log_status}")
     
     except Exception as e:
         print(f"[FlightLoop] FATAL ERROR: {e}")
@@ -121,6 +164,9 @@ def flight_loop(
     
     finally:
         print("[FlightLoop] Shutting down...")
+        if 'csv_file' in locals() and csv_file:
+            csv_file.close()
+            print("[FlightLoop] CSV log file closed")
         if 'hardware' in locals():
             hardware.close()
         if 'shared_buffer' in locals():

@@ -51,7 +51,10 @@ class SignalGenerator:
         """
         Reconstruct signal for all motors at time t using Fourier series.
         
-        Formula: Signal_i(t) = sum_n(coeff[i,n] * sin((n+1)*ω*(t - t0) + phase[i,n]))
+        Formula: Signal_i(t) = A₀ + sum_n(Aₙ * sin(n*ω*(t - t0) + phase[i,n]))
+        where coeffs[:, 0] = A₀ (DC offset)
+              coeffs[:, 1] = A₁ (1st harmonic)
+              coeffs[:, 2] = A₂ (2nd harmonic), etc.
         
         Args:
             t: Time in seconds
@@ -59,12 +62,17 @@ class SignalGenerator:
         Returns:
             Array of shape [n_motors] with values constrained to [value_min, value_max]
         """
-        signal = np.zeros(self.n_motors, dtype=np.float64)
         t_eff = max(0.0, t - self.start_time_offset)
-        for n in range(self.n_terms):
-            harmonic_order = n + 1
+        
+        # Start with DC offset (coefficient 0)
+        signal = self.coeffs[:, 0].copy()
+        
+        # Add harmonic components (coefficients 1, 2, 3, ...)
+        for n in range(1, self.n_terms):
+            harmonic_order = n  # n=1 -> 1st harmonic, n=2 -> 2nd harmonic, etc.
             phase = harmonic_order * self.omega * t_eff + self.phases[:, n]
             signal += self.coeffs[:, n] * np.sin(phase)
+        
         # Constrain to requested range without remapping full span to [0,1]
         return np.clip(signal, self.value_min, self.value_max)
 

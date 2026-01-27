@@ -18,6 +18,10 @@ def generate_square_pulse(
     """
     Generate Fourier coefficients for a square wave pulse.
     
+    Fourier series: signal(t) = A₀ + Σ Aₙ * sin(n*2π*f*t)
+    For square wave: A₀ = amplitude * duty_cycle
+                     Aₙ = (2*amplitude/nπ) * sin(n*π*duty_cycle)
+    
     Args:
         n_motors: Number of motors (all get same coefficients)
         amplitude: Signal amplitude in [0, 1]
@@ -28,20 +32,23 @@ def generate_square_pulse(
     
     Returns:
         Coefficient matrix [n_motors, n_terms]
+        coeffs[:, 0] = DC offset
+        coeffs[:, 1] = 1st harmonic amplitude
+        coeffs[:, 2] = 2nd harmonic amplitude, etc.
     """
-    # Adjust base frequency to match desired period
-    omega = 2.0 * np.pi / period
-    
-    # Compute Fourier coefficients for square wave
-    # a_n = (4*A/π) * sin(n*π*duty) / n  for odd n
     coeffs = np.zeros((n_motors, n_terms))
     
-    for n in range(1, n_terms + 1):
-        # Square wave: only odd harmonics (but we compute all for flexibility)
+    # DC component (average value)
+    dc_offset = amplitude * duty_cycle
+    coeffs[:, 0] = dc_offset
+    
+    # Harmonic components (n=1, 2, 3, ...)
+    for n in range(1, n_terms):
         harmonic_order = n
+        # Fourier coefficient for square wave
         sin_term = np.sin(harmonic_order * np.pi * duty_cycle)
-        a_n = (4.0 * amplitude / np.pi) * sin_term / harmonic_order if harmonic_order > 0 else 0
-        coeffs[:, n - 1] = a_n
+        a_n = (2.0 * amplitude / (harmonic_order * np.pi)) * sin_term
+        coeffs[:, n] = a_n
     
     return coeffs
 
