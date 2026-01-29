@@ -62,16 +62,36 @@ class RealSPI:
         self.spi = spidev.SpiDev()
         self.spi.open(bus, device)
         self.spi.max_speed_hz = 1000000  # 1 MHz
+        self.spi.mode = 0  # SPI Mode 0 (CPOL=0, CPHA=0)
+        self.spi.bits_per_word = 8
     
     def xfer3(self, pwm_values: List[int]) -> None:
         """
-        Transfer PWM values via SPI (one-way, PWM only).
+        Transfer PWM values via SPI with proper packet formatting.
+        
+        Protocol:
+          - Start byte: 0xAA (sync marker)
+          - N motors × 2 bytes each (PWM as 16-bit big-endian)
+          - End byte: 0x55 (packet terminator)
         
         Args:
-            pwm_values: List of 36 PWM values
+            pwm_values: List of PWM values (1000-2000) for this Pico's motors
         """
-        # Convert PWM values to bytes and transfer
-        self.spi.xfer3(pwm_values)
+        # Build packet: [START, PWM_HIGH_0, PWM_LOW_0, ..., PWM_HIGH_N, PWM_LOW_N, END]
+        packet = [0xAA]  # Start byte
+        
+        for pwm in pwm_values:
+            # Clamp PWM to valid range
+            pwm = max(1000, min(2000, int(pwm)))
+            # Split into 2 bytes (big-endian: high byte first)
+            high_byte = (pwm >> 8) & 0xFF
+            low_byte = pwm & 0xFF
+            packet.extend([high_byte, low_byte])
+        
+        packet.append(0x55)  # End byte
+        
+        # Send via SPI (xfer2 returns data, xfer3 is write-only but we use xfer2 for compatibility)
+        self.spi.xfer2(packet)
     
     def close(self) -> None:
         """Close the SPI interface."""
@@ -136,6 +156,9 @@ class HardwareInterface:
         for pico_id in self.pico_id_to_motors.keys():
             self.pico_connected[pico_id] = True  # Assume all connected initially
         
+        # SPI interfaces for each Pico (separate chip selects)
+        self.spi_interfaces: Dict[int, any] = {}  # pico_id → SPI interface
+        
         # Statistics
         self.frames_sent = 0
         self.frames_skipped_motors = []
@@ -161,17 +184,34 @@ class HardwareInterface:
         """Initialize SPI and GPIO drivers based on platform."""
         if self.use_mock:
             print(f"[HW] Running on {self.platform} with MOCK drivers")
-            self.spi = MockSPI()
+            # Create one mock SPI per Pico
+            for pico_id in self.pico_id_to_motors.keys():
+                self.spi_interfaces[pico_id] = MockSPI()
             self.gpio = MockGPIO()
         else:
             print(f"[HW] Running on {self.platform} with REAL drivers")
             try:
-                self.spi = RealSPI()
+                # Create separate SPI interfaces for each Pico
+                # Pico 0: SPI bus 0, device 0 (CE0, GPIO 8)
+                # Pico 1: SPI bus 0, device 1 (CE1, GPIO 7)
+                # Pico 2 & 3: Use GPIO chip selects manually if needed
+                for pico_id in sorted(self.pico_id_to_motors.keys()):
+                    if pico_id < 2:
+                        # Use hardware chip select for Pico 0 and 1
+                        self.spi_interfaces[pico_id] = RealSPI(bus=0, device=pico_id)
+                        print(f"[HW] Pico{pico_id} initialized on SPI0.{pico_id} (CE{pico_id})")
+                    else:
+                        # For Pico 2 and 3, you'll need to use GPIO chip selects
+                        # This is a limitation - Raspberry Pi only has 2 hardware CE pins
+                        print(f"[HW] WARNING: Pico{pico_id} requires manual GPIO chip select (not implemented)")
+                        self.spi_interfaces[pico_id] = MockSPI()  # Fallback to mock
+                
                 self.gpio = RealGPIO()
             except Exception as e:
                 print(f"[HW] Failed to init real drivers: {e}, falling back to mock")
                 self.use_mock = True
-                self.spi = MockSPI()
+                for pico_id in self.pico_id_to_motors.keys():
+                    self.spi_interfaces[pico_id] = MockSPI()
                 self.gpio = MockGPIO()
     
     def _map_pwm_values(self, pwm_values: np.ndarray) -> Dict[int, List[int]]:
@@ -223,16 +263,18 @@ class HardwareInterface:
         # Map PWM values to per-Pico arrays
         pico_pwm_map = self._map_pwm_values(pwm_values)
         
-        # Send to each Pico
+        # Send to each Pico via its dedicated SPI interface
         for pico_id, pwm_list in pico_pwm_map.items():
             if len(pwm_list) == 0:
                 continue  # No motors for this Pico
             
             try:
                 if self.pico_connected.get(pico_id, False):
-                    self.spi.xfer3(pwm_list)
-                    if self.frames_sent % 400 == 0:  # Log every 1 second at 400Hz
-                        print(f"[HW] Frame {self.frames_sent}: Pico{pico_id} sent {len(pwm_list)} PWM values")
+                    spi = self.spi_interfaces.get(pico_id)
+                    if spi:
+                        spi.xfer3(pwm_list)
+                        if self.frames_sent % 400 == 0:  # Log every 1 second at 400Hz
+                            print(f"[HW] Frame {self.frames_sent}: Pico{pico_id} sent {len(pwm_list)} PWM values")
                 else:
                     # Pico disconnected - log once per failure
                     if self.frames_sent == 1:
@@ -260,6 +302,11 @@ class HardwareInterface:
     
     def close(self) -> None:
         """Close hardware interfaces."""
-        if hasattr(self.spi, 'close'):
-            self.spi.close()
+        for pico_id, spi in self.spi_interfaces.items():
+            if hasattr(spi, 'close'):
+                try:
+                    spi.close()
+                    print(f"[HW] Pico{pico_id} SPI interface closed")
+                except Exception as e:
+                    print(f"[HW] Error closing Pico{pico_id}: {e}")
         print("[HW] Hardware interface closed")
