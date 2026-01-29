@@ -88,16 +88,13 @@ class RealGPIO:
         Args:
             sync_pin: GPIO pin number for sync signal
         """
-        import lgpio # type: ignore
-        self.gpio = lgpio.gpiochip_open(0)
-        self.sync_pin = sync_pin
-        lgpio.gpio_claim_output(self.gpio, self.sync_pin)
+        from gpiozero import OutputDevice
+        self.sync_pin = OutputDevice(sync_pin)
     
     def toggle_sync_pin(self) -> None:
         """Toggle the GPIO sync pin."""
-        import lgpio # type: ignore
-        lgpio.gpio_write(self.gpio, self.sync_pin, 1)
-        lgpio.gpio_write(self.gpio, self.sync_pin, 0)
+        self.sync_pin.on()
+        self.sync_pin.off()
 
 
 class HardwareInterface:
