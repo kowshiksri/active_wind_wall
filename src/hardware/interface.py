@@ -109,11 +109,15 @@ class RealGPIO:
             sync_pin: GPIO pin number for sync signal
         """
         from gpiozero import OutputDevice
+        import time
         self.sync_pin = OutputDevice(sync_pin)
+        self.time = time
+        print(f"[GPIO] Sync pin initialized on GPIO {sync_pin} (Physical Pin 11)")
     
     def toggle_sync_pin(self) -> None:
-        """Toggle the GPIO sync pin."""
+        """Toggle the GPIO sync pin with a 10µs pulse."""
         self.sync_pin.on()
+        self.time.sleep(0.00001)  # 10 microsecond pulse
         self.sync_pin.off()
 
 
