@@ -21,12 +21,17 @@ with gpiod.request_lines(
         )
     },
 ) as request:
-    print("PWM running for 10 seconds...")
+    print(f"PWM running for {DURATION} seconds...")
     start = time.time()
-    while time.time() - start < DURATION:
-        request.set_value(GPIO_LINE, Value.ACTIVE)
-        time.sleep(t_on)
+    try:
+        while time.time() - start < DURATION:
+            request.set_value(GPIO_LINE, Value.ACTIVE)
+            time.sleep(t_on)
+            request.set_value(GPIO_LINE, Value.INACTIVE)
+            time.sleep(t_off)
+    finally:
+        # This ensures the pin is LOW even if you hit Ctrl+C
         request.set_value(GPIO_LINE, Value.INACTIVE)
-        time.sleep(t_off)
+        print("GPIO cleared to INACTIVE.")
 
 print("Done.")
