@@ -7,7 +7,10 @@ Simplified for 4-Pico SPI communication with manual chip select.
 import platform
 from typing import List, Optional, Dict
 import numpy as np
-from config import MOTOR_TO_PICO_LOOKUP, PICO_MOTOR_MAP
+from config import MOTOR_TO_PICO_LOOKUP, PICO_MOTOR_MAP, PWM_MIN, PWM_MAX
+
+PACKET_START = 0xAA
+PACKET_END = 0x55
 
 
 class MockSPI:
@@ -247,7 +250,7 @@ class HardwareInterface:
         Returns:
             List of 21 bytes
         """
-        packet = [0xAA]  # Start byte
+        packet = [PACKET_START]  # Start byte
         
         # Get motor IDs for this Pico
         motor_ids = self.pico_id_to_motors.get(pico_id, [])
@@ -256,13 +259,13 @@ class HardwareInterface:
         for motor_id in motor_ids:
             pwm = int(pwm_values[motor_id])
             # Clamp to valid range
-            pwm = max(1000, min(2000, pwm))
+            pwm = max(PWM_MIN, min(PWM_MAX, pwm))
             # Split into 2 bytes (big-endian)
             high_byte = (pwm >> 8) & 0xFF
             low_byte = pwm & 0xFF
             packet.extend([high_byte, low_byte])
         
-        packet.append(0x55)  # End byte
+        packet.append(PACKET_END)  # End byte
         
         return packet
     

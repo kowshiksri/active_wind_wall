@@ -52,7 +52,10 @@ SHARED_MEM_SIZE: int = 36 * 8  # 36 motors * PWM values * 8 bytes (float64)
 #   - Redistribute motors across Picos
 #   - Test with single Pico (motors map to Pico0, others are ignored)
 
-PICO_MOTOR_MAP: dict = {
+# Set True to test a single motor on Pico0 (motor 0 only).
+SINGLE_MOTOR_TEST: bool = True
+
+FULL_PICO_MOTOR_MAP: dict = {
     'quadrant_top_left': {
         'pico_id': 0,
         'motors': list(range(0, 9)),      # Motors 0-8
@@ -78,6 +81,19 @@ PICO_MOTOR_MAP: dict = {
         'description': 'Bottom-Right 3x3 Grid'
     }
 }
+
+PICO_MOTOR_MAP: dict = (
+    {
+        'single_motor_test': {
+            'pico_id': 0,
+            'motors': [0],
+            'pin_offset': 0,
+            'description': 'Single Motor Test (Motor 0 on Pico0)'
+        }
+    }
+    if SINGLE_MOTOR_TEST
+    else FULL_PICO_MOTOR_MAP
+)
 
 # Derived motor-to-Pico lookup (auto-generated from PICO_MOTOR_MAP)
 # Maps motor_id → (pico_id, pin_position_on_pico)
