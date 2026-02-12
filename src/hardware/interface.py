@@ -123,20 +123,21 @@ class RealGPIO:
         for pin in all_pins:
             config[pin] = gpiod.LineSettings(direction=Direction.OUTPUT)
         
-        # Request all GPIO lines in one go
-        self.request = gpiod.request_lines(
+        # Request all GPIO lines and keep the request open
+        # Note: Unlike the context manager examples, we keep this persistent
+        self.line_request = gpiod.request_lines(
             self.gpio_chip,
             consumer="wind-wall-control",
             config=config
         )
         
         # Initialize sync pin to LOW
-        self.request.set_value(self.sync_pin, Value.INACTIVE)
+        self.line_request.set_value(self.sync_pin, Value.INACTIVE)
         print(f"[GPIO] Using gpiod (Pi 5) - Sync pin initialized on GPIO {self.sync_pin}")
         
         # Initialize CS pins to HIGH (deselected)
         for pico_id, cs_pin in self.cs_pins.items():
-            self.request.set_value(cs_pin, Value.ACTIVE)
+            self.line_request.set_value(cs_pin, Value.ACTIVE)
             print(f"[GPIO] CS pin for Pico {pico_id} on GPIO {cs_pin}")
     
     def setup_cs_pin(self, pin: int) -> None:
@@ -145,17 +146,17 @@ class RealGPIO:
     
     def set_cs_high(self, pin: int) -> None:
         """Set CS pin HIGH (deselect)."""
-        self.request.set_value(pin, self.Value.ACTIVE)
+        self.line_request.set_value(pin, self.Value.ACTIVE)
     
     def set_cs_low(self, pin: int) -> None:
         """Set CS pin LOW (select)."""
-        self.request.set_value(pin, self.Value.INACTIVE)
+        self.line_request.set_value(pin, self.Value.INACTIVE)
     
     def toggle_sync_pin(self) -> None:
         """Toggle the GPIO sync pin with a 10µs pulse."""
-        self.request.set_value(self.sync_pin, self.Value.ACTIVE)
+        self.line_request.set_value(self.sync_pin, self.Value.ACTIVE)
         self.time.sleep(0.00001)  # 10 microsecond pulse
-        self.request.set_value(self.sync_pin, self.Value.INACTIVE)
+        self.line_request.set_value(self.sync_pin, self.Value.INACTIVE)
 
 
 class HardwareInterface:
