@@ -34,11 +34,10 @@ print("\n[Step 2] Initializing GPIO pins...")
 try:
     gpio_chip = '/dev/gpiochip4'
     sync_pin = 22
-    cs_pin = 8  # Pico 0 CS
+    # cs_pin = 8  # Pico 0 CS
     
     config = {
         sync_pin: gpiod.LineSettings(direction=Direction.OUTPUT),
-        cs_pin: gpiod.LineSettings(direction=Direction.OUTPUT),
     }
     
     gpio_request = gpiod.request_lines(
@@ -49,9 +48,9 @@ try:
     
     # Set initial states
     gpio_request.set_value(sync_pin, Value.INACTIVE)  # Sync LOW
-    gpio_request.set_value(cs_pin, Value.ACTIVE)      # CS HIGH (deselected)
+    # gpio_request.set_value(cs_pin, Value.ACTIVE)      # CS HIGH (deselected)
     
-    print(f"✓ GPIO initialized: Sync={sync_pin}, CS={cs_pin}")
+    print(f"✓ GPIO initialized: Sync={sync_pin}")
     
 except Exception as e:
     print(f"✗ GPIO initialization failed: {e}")
@@ -99,21 +98,16 @@ print("\n[Step 5] Sending packet via SPI...")
 input("  Press Enter to send (check oscilloscope is connected to GPIO 14)...")
 
 try:
-    # Select Pico (CS LOW)
-    gpio_request.set_value(cs_pin, Value.INACTIVE)
-    time.sleep(0.001)  # Small delay
+    # spidev handles the CS (GPIO 8) automatically when spi.open(0,0) is used.
+    # No need to manually toggle the CS pin via gpiod.
     
     # Send packet
     spi.writebytes(packet)
     print(f"✓ Sent {len(packet)} bytes via SPI")
-    
-    # Deselect Pico (CS HIGH)
-    time.sleep(0.001)
-    gpio_request.set_value(cs_pin, Value.ACTIVE)
+    print("  (Hardware CS/GPIO 8 was toggled automatically by the driver)")
     
 except Exception as e:
     print(f"✗ SPI send failed: {e}")
-    gpio_request.set_value(cs_pin, Value.ACTIVE)  # Ensure CS is deselected
     sys.exit(1)
 
 # Step 6: Trigger sync pulse
