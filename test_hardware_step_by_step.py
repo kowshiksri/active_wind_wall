@@ -140,20 +140,24 @@ for pwm in test_values:
     # Build packet
     packet = [0xAA, (pwm >> 8) & 0xFF, pwm & 0xFF, 0x55]
     
-    # Send via SPI
-    gpio_request.set_value(cs_pin, Value.INACTIVE)
-    time.sleep(0.001)
-    spi.writebytes(packet)
-    time.sleep(0.001)
-    gpio_request.set_value(cs_pin, Value.ACTIVE)
-    
-    # Trigger sync
-    gpio_request.set_value(sync_pin, Value.ACTIVE)
-    time.sleep(0.00001)
-    gpio_request.set_value(sync_pin, Value.INACTIVE)
-    
-    print(f"  Sent. Check oscilloscope (pulse should be ~{pwm/1000:.1f} ms)")
-    time.sleep(2)  # Wait 2s between updates
+    # Send via SPI - Driver handles GPIO 8 (CS) automatically
+    try:
+        spi.writebytes(packet)
+        
+        # Small delay to let SPI finish before triggering sync
+        time.sleep(0.001) 
+        
+        # Trigger sync pulse
+        gpio_request.set_value(sync_pin, Value.ACTIVE)
+        time.sleep(0.00001)  # 10 µs pulse
+        gpio_request.set_value(sync_pin, Value.INACTIVE)
+        
+        print(f"  Sent. Check oscilloscope (pulse should be ~{pwm/1000:.1f} ms)")
+        time.sleep(2)  # Wait 2s between updates
+        
+    except Exception as e:
+        print(f"  ✗ Failed to send PWM {pwm}: {e}")
+        break
 
 print("\n[Step 9] Cleanup...")
 try:
