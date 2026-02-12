@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-Step-by-step hardware diagnostic test (FIXED: Uses GPIO 25 for Manual CS).
-Tests each component of the SPI/GPIO pipeline independently.
-Run with: sudo python3 test_hardware_step_by_step.py
+Step-by-step hardware diagnostic test (FINAL WORKING VERSION).
+- Uses GPIO 25 for Manual Chip Select (Connect Pi Pin 22 -> Pico Pin 22/GP17)
+- Ignores the Kernel's native CS (GPIO 8) to avoid errors.
 """
 
 import time
 import sys
 
 print("="*70)
-print("Hardware Diagnostic Test - Step by Step (GPIO 25 CS)")
+print("Hardware Diagnostic Test - Step by Step (GPIO 25)")
 print("="*70)
 
 # Step 1: Test imports
@@ -35,13 +35,13 @@ try:
     gpio_chip = '/dev/gpiochip4'
     sync_pin = 22
     
-    # --- CHANGED: Use GPIO 25 (Physical Pin 22) instead of GPIO 8 ---
-    # This avoids the "Device busy" error because the Kernel doesn't own this pin.
+    # WE USE GPIO 25 (Physical Pin 22) AS MANUAL CS
+    # This avoids conflict with the Kernel's SPI driver on GPIO 8
     cs_pin = 25  
     
     config = {
         sync_pin: gpiod.LineSettings(direction=Direction.OUTPUT),
-        cs_pin:   gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE) # Start HIGH (Deselected)
+        cs_pin:   gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE) # Start HIGH
     }
     
     gpio_request = gpiod.request_lines(
@@ -51,48 +51,40 @@ try:
     )
     
     # Set initial states
-    gpio_request.set_value(sync_pin, Value.INACTIVE)  # Sync LOW
-    gpio_request.set_value(cs_pin, Value.ACTIVE)      # CS HIGH (deselected)
+    gpio_request.set_value(sync_pin, Value.INACTIVE)
+    gpio_request.set_value(cs_pin, Value.ACTIVE)
     
-    print(f"✓ GPIO initialized: Sync={sync_pin}, CS={cs_pin}")
+    print(f"✓ GPIO initialized: Sync={sync_pin}, Manual CS={cs_pin}")
     
 except Exception as e:
     print(f"✗ GPIO initialization failed: {e}")
-    print("  Hint: Run with sudo, or add user to gpio group")
+    print("  Hint: Run with sudo")
     sys.exit(1)
 
 # Step 3: Initialize SPI
 print("\n[Step 3] Initializing SPI...")
 try:
     spi = spidev.SpiDev()
-    spi.open(0, 0)  # SPI0, device 0
-    spi.no_cs = True  # Tell driver to ignore its internal CS
-    spi.max_speed_hz = 1000000  # 1 MHz
-    spi.mode = 0  # Mode 0
+    spi.open(0, 0)  # SPI0, device 0 (This internally claims GPIO 8, which is fine)
+    
+    # REMOVED: spi.no_cs = True (This caused Errno 22)
+    # We just let the driver toggle GPIO 8 uselessly. We don't use it.
+    
+    spi.max_speed_hz = 1000000
+    spi.mode = 0
     spi.bits_per_word = 8
-    print("✓ SPI initialized: 1 MHz, Mode 0, Manual CS")
+    print("✓ SPI initialized: 1 MHz, Mode 0")
     
 except Exception as e:
     print(f"✗ SPI initialization failed: {e}")
-    print("  Hint: Enable SPI with raspi-config")
     sys.exit(1)
 
 # Step 4: Test packet building
 print("\n[Step 4] Building test packet...")
 try:
-    # Single motor, PWM = 1500 µs (middle value)
     pwm_value = 1500
-    
-    # Packet format: [0xAA, PWM_HIGH, PWM_LOW, 0x55]
-    packet = [
-        0xAA,  # Start byte
-        (pwm_value >> 8) & 0xFF,  # High byte
-        pwm_value & 0xFF,         # Low byte
-        0x55   # End byte
-    ]
-    
+    packet = [0xAA, (pwm_value >> 8) & 0xFF, pwm_value & 0xFF, 0x55]
     print(f"✓ Packet built: {[hex(b) for b in packet]}")
-    print(f"  PWM value: {pwm_value} µs")
     
 except Exception as e:
     print(f"✗ Packet building failed: {e}")
@@ -100,21 +92,15 @@ except Exception as e:
 
 # Step 5: Send test packet
 print("\n[Step 5] Sending packet via SPI...")
-input("  Press Enter to send (check oscilloscope is connected to GPIO 14)...")
+input("  Press Enter to send (check oscilloscope on Pico GP14)...")
 
 try:
-    # --- MANUAL CHIP SELECT SEQUENCE ---
-    # 1. Pull CS Low (Wake up Pico)
-    gpio_request.set_value(cs_pin, Value.INACTIVE)
+    # MANUAL CS SEQUENCE
+    gpio_request.set_value(cs_pin, Value.INACTIVE) # Pull CS Low (Select)
+    spi.writebytes(packet)                         # Send Data
+    gpio_request.set_value(cs_pin, Value.ACTIVE)   # Pull CS High (Execute)
     
-    # 2. Send Data
-    spi.writebytes(packet)
-    
-    # 3. Pull CS High (Sleep/Execute)
-    gpio_request.set_value(cs_pin, Value.ACTIVE)
-    # -----------------------------------
-    
-    print(f"✓ Sent {len(packet)} bytes via SPI (Manually toggled CS on GPIO {cs_pin})")
+    print(f"✓ Sent bytes. Manual CS (GPIO {cs_pin}) toggled.")
     
 except Exception as e:
     print(f"✗ SPI send failed: {e}")
@@ -123,10 +109,10 @@ except Exception as e:
 # Step 6: Trigger sync pulse
 print("\n[Step 6] Sending sync trigger...")
 try:
-    gpio_request.set_value(sync_pin, Value.ACTIVE)   # HIGH
-    time.sleep(0.00001)  # 10 µs pulse
-    gpio_request.set_value(sync_pin, Value.INACTIVE)  # LOW
-    print("✓ Sync pulse sent (10 µs)")
+    gpio_request.set_value(sync_pin, Value.ACTIVE)
+    time.sleep(0.00001)
+    gpio_request.set_value(sync_pin, Value.INACTIVE)
+    print("✓ Sync pulse sent")
     
 except Exception as e:
     print(f"✗ Sync trigger failed: {e}")
@@ -134,10 +120,8 @@ except Exception as e:
 
 # Step 7: Check oscilloscope
 print("\n[Step 7] Check oscilloscope now!")
-print("  Expected on GPIO 14:")
-print("  - Pulse width: ~1.5 ms (1500 µs)")
-print("  - Period: ~16 ms (62.5 Hz)")
-print("  - Voltage: 0-3.3V square wave")
+print("  Expected on Pico Pin 1 (GP0):")
+print("  - Pulse width: ~1.5 ms")
 input("\n  Press Enter to test different PWM values...")
 
 # Step 8: Test multiple PWM values
@@ -146,34 +130,25 @@ test_values = [1000, 1250, 1500, 1750, 2000]
 
 for pwm in test_values:
     print(f"\n  Sending PWM = {pwm} µs")
-    
-    # Build packet
     packet = [0xAA, (pwm >> 8) & 0xFF, pwm & 0xFF, 0x55]
     
-    # Send via SPI with Manual CS
     try:
-        # 1. Select (Low)
+        # Manual CS Toggle
         gpio_request.set_value(cs_pin, Value.INACTIVE)
-        
-        # 2. Write
         spi.writebytes(packet)
-        
-        # 3. Deselect (High)
         gpio_request.set_value(cs_pin, Value.ACTIVE)
         
-        # Small delay to let SPI finish before triggering sync
+        # Sync Trigger
         time.sleep(0.001) 
-        
-        # Trigger sync pulse
         gpio_request.set_value(sync_pin, Value.ACTIVE)
-        time.sleep(0.00001)  # 10 µs pulse
+        time.sleep(0.00001)
         gpio_request.set_value(sync_pin, Value.INACTIVE)
         
-        print(f"  Sent. Check oscilloscope (pulse should be ~{pwm/1000:.1f} ms)")
-        time.sleep(2)  # Wait 2s between updates
+        print(f"  Sent. Check oscilloscope.")
+        time.sleep(2)
         
     except Exception as e:
-        print(f"  ✗ Failed to send PWM {pwm}: {e}")
+        print(f"  ✗ Failed: {e}")
         break
 
 print("\n[Step 9] Cleanup...")
@@ -183,11 +158,3 @@ try:
     print("✓ Resources released")
 except:
     pass
-
-print("\n" + "="*70)
-print("Diagnostic complete!")
-print("="*70)
-print("\nDid you see PWM changes on the oscilloscope?")
-print("  YES → Hardware working! Issue is in flight loop code")
-print("  NO  → Check wiring or Pico firmware")
-print("="*70)
