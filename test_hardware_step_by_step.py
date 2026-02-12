@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Step-by-step hardware diagnostic test (FIXED FOR MANUAL CS).
+Step-by-step hardware diagnostic test (FIXED: Uses GPIO 25 for Manual CS).
 Tests each component of the SPI/GPIO pipeline independently.
 Run with: sudo python3 test_hardware_step_by_step.py
 """
@@ -9,7 +9,7 @@ import time
 import sys
 
 print("="*70)
-print("Hardware Diagnostic Test - Step by Step (Manual CS Fix)")
+print("Hardware Diagnostic Test - Step by Step (GPIO 25 CS)")
 print("="*70)
 
 # Step 1: Test imports
@@ -34,8 +34,11 @@ print("\n[Step 2] Initializing GPIO pins...")
 try:
     gpio_chip = '/dev/gpiochip4'
     sync_pin = 22
-    cs_pin = 8  # <--- WE ARE CLAIMING THIS NOW
-
+    
+    # --- CHANGED: Use GPIO 25 (Physical Pin 22) instead of GPIO 8 ---
+    # This avoids the "Device busy" error because the Kernel doesn't own this pin.
+    cs_pin = 25  
+    
     config = {
         sync_pin: gpiod.LineSettings(direction=Direction.OUTPUT),
         cs_pin:   gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE) # Start HIGH (Deselected)
@@ -47,7 +50,7 @@ try:
         config=config
     )
     
-    # Set initial states explicitly just to be sure
+    # Set initial states
     gpio_request.set_value(sync_pin, Value.INACTIVE)  # Sync LOW
     gpio_request.set_value(cs_pin, Value.ACTIVE)      # CS HIGH (deselected)
     
@@ -63,7 +66,7 @@ print("\n[Step 3] Initializing SPI...")
 try:
     spi = spidev.SpiDev()
     spi.open(0, 0)  # SPI0, device 0
-    spi.no_cs = True  # <--- CRITICAL: Disable automatic CS so we can control it manually
+    spi.no_cs = True  # Tell driver to ignore its internal CS
     spi.max_speed_hz = 1000000  # 1 MHz
     spi.mode = 0  # Mode 0
     spi.bits_per_word = 8
@@ -111,7 +114,7 @@ try:
     gpio_request.set_value(cs_pin, Value.ACTIVE)
     # -----------------------------------
     
-    print(f"✓ Sent {len(packet)} bytes via SPI (Manually toggled CS)")
+    print(f"✓ Sent {len(packet)} bytes via SPI (Manually toggled CS on GPIO {cs_pin})")
     
 except Exception as e:
     print(f"✗ SPI send failed: {e}")
