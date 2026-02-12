@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Step-by-step hardware diagnostic test.
+Step-by-step hardware diagnostic test (FIXED FOR MANUAL CS).
 Tests each component of the SPI/GPIO pipeline independently.
 Run with: sudo python3 test_hardware_step_by_step.py
 """
@@ -9,7 +9,7 @@ import time
 import sys
 
 print("="*70)
-print("Hardware Diagnostic Test - Step by Step")
+print("Hardware Diagnostic Test - Step by Step (Manual CS Fix)")
 print("="*70)
 
 # Step 1: Test imports
@@ -34,10 +34,11 @@ print("\n[Step 2] Initializing GPIO pins...")
 try:
     gpio_chip = '/dev/gpiochip4'
     sync_pin = 22
-    # cs_pin = 8  # Pico 0 CS
-    
+    cs_pin = 8  # <--- WE ARE CLAIMING THIS NOW
+
     config = {
         sync_pin: gpiod.LineSettings(direction=Direction.OUTPUT),
+        cs_pin:   gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE) # Start HIGH (Deselected)
     }
     
     gpio_request = gpiod.request_lines(
@@ -46,11 +47,11 @@ try:
         config=config
     )
     
-    # Set initial states
+    # Set initial states explicitly just to be sure
     gpio_request.set_value(sync_pin, Value.INACTIVE)  # Sync LOW
-    # gpio_request.set_value(cs_pin, Value.ACTIVE)      # CS HIGH (deselected)
+    gpio_request.set_value(cs_pin, Value.ACTIVE)      # CS HIGH (deselected)
     
-    print(f"✓ GPIO initialized: Sync={sync_pin}")
+    print(f"✓ GPIO initialized: Sync={sync_pin}, CS={cs_pin}")
     
 except Exception as e:
     print(f"✗ GPIO initialization failed: {e}")
@@ -62,10 +63,11 @@ print("\n[Step 3] Initializing SPI...")
 try:
     spi = spidev.SpiDev()
     spi.open(0, 0)  # SPI0, device 0
+    spi.no_cs = True  # <--- CRITICAL: Disable automatic CS so we can control it manually
     spi.max_speed_hz = 1000000  # 1 MHz
     spi.mode = 0  # Mode 0
     spi.bits_per_word = 8
-    print("✓ SPI initialized: 1 MHz, Mode 0")
+    print("✓ SPI initialized: 1 MHz, Mode 0, Manual CS")
     
 except Exception as e:
     print(f"✗ SPI initialization failed: {e}")
@@ -98,13 +100,18 @@ print("\n[Step 5] Sending packet via SPI...")
 input("  Press Enter to send (check oscilloscope is connected to GPIO 14)...")
 
 try:
-    # spidev handles the CS (GPIO 8) automatically when spi.open(0,0) is used.
-    # No need to manually toggle the CS pin via gpiod.
+    # --- MANUAL CHIP SELECT SEQUENCE ---
+    # 1. Pull CS Low (Wake up Pico)
+    gpio_request.set_value(cs_pin, Value.INACTIVE)
     
-    # Send packet
+    # 2. Send Data
     spi.writebytes(packet)
-    print(f"✓ Sent {len(packet)} bytes via SPI")
-    print("  (Hardware CS/GPIO 8 was toggled automatically by the driver)")
+    
+    # 3. Pull CS High (Sleep/Execute)
+    gpio_request.set_value(cs_pin, Value.ACTIVE)
+    # -----------------------------------
+    
+    print(f"✓ Sent {len(packet)} bytes via SPI (Manually toggled CS)")
     
 except Exception as e:
     print(f"✗ SPI send failed: {e}")
@@ -140,9 +147,16 @@ for pwm in test_values:
     # Build packet
     packet = [0xAA, (pwm >> 8) & 0xFF, pwm & 0xFF, 0x55]
     
-    # Send via SPI - Driver handles GPIO 8 (CS) automatically
+    # Send via SPI with Manual CS
     try:
+        # 1. Select (Low)
+        gpio_request.set_value(cs_pin, Value.INACTIVE)
+        
+        # 2. Write
         spi.writebytes(packet)
+        
+        # 3. Deselect (High)
+        gpio_request.set_value(cs_pin, Value.ACTIVE)
         
         # Small delay to let SPI finish before triggering sync
         time.sleep(0.001) 
