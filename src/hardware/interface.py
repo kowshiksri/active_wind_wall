@@ -95,36 +95,48 @@ class RealSPI:
 
 
 class RealGPIO:
-    """Real GPIO interface for Raspberry Pi with manual CS control."""
+    """Real GPIO interface for Raspberry Pi 5 using gpiod."""
     
     def __init__(self, sync_pin: int = 22, cs_pins: Dict[int, int] = None):
         """
-        Initialize real GPIO interface.
+        Initialize real GPIO interface using gpiod (Pi 5 compatible).
         
         Args:
             sync_pin: GPIO pin number for sync signal (default: GPIO 22)
             cs_pins: Dict mapping pico_id to GPIO pin for chip select
         """
-        import RPi.GPIO as GPIO # type: ignore
+        import gpiod # type: ignore
+        from gpiod.line import Direction, Value # type: ignore
         import time
         
-        self.GPIO = GPIO
+        self.gpiod = gpiod
+        self.Direction = Direction
+        self.Value = Value
         self.time = time
         self.sync_pin = sync_pin
         self.cs_pins = cs_pins or {0: 8, 1: 7, 2: 17, 3: 27}
+        self.gpio_chip = '/dev/gpiochip4'  # Pi 5 uses gpiochip4
         
-        # Setup GPIO mode
-        self.GPIO.setmode(self.GPIO.BCM)
+        # Build configuration for all output pins
+        all_pins = [sync_pin] + list(self.cs_pins.values())
+        config = {}
+        for pin in all_pins:
+            config[pin] = gpiod.LineSettings(direction=Direction.OUTPUT)
         
-        # Setup sync pin (output, initially LOW)
-        self.GPIO.setup(self.sync_pin, self.GPIO.OUT)
-        self.GPIO.output(self.sync_pin, self.GPIO.LOW)
-        print(f"[GPIO] Sync pin initialized on GPIO {self.sync_pin}")
+        # Request all GPIO lines in one go
+        self.request = gpiod.request_lines(
+            self.gpio_chip,
+            consumer="wind-wall-control",
+            config=config
+        )
         
-        # Setup CS pins (output, initially HIGH = deselected)
+        # Initialize sync pin to LOW
+        self.request.set_value(self.sync_pin, Value.INACTIVE)
+        print(f"[GPIO] Using gpiod (Pi 5) - Sync pin initialized on GPIO {self.sync_pin}")
+        
+        # Initialize CS pins to HIGH (deselected)
         for pico_id, cs_pin in self.cs_pins.items():
-            self.GPIO.setup(cs_pin, self.GPIO.OUT)
-            self.GPIO.output(cs_pin, self.GPIO.HIGH)
+            self.request.set_value(cs_pin, Value.ACTIVE)
             print(f"[GPIO] CS pin for Pico {pico_id} on GPIO {cs_pin}")
     
     def setup_cs_pin(self, pin: int) -> None:
@@ -133,17 +145,17 @@ class RealGPIO:
     
     def set_cs_high(self, pin: int) -> None:
         """Set CS pin HIGH (deselect)."""
-        self.GPIO.output(pin, self.GPIO.HIGH)
+        self.request.set_value(pin, self.Value.ACTIVE)
     
     def set_cs_low(self, pin: int) -> None:
         """Set CS pin LOW (select)."""
-        self.GPIO.output(pin, self.GPIO.LOW)
+        self.request.set_value(pin, self.Value.INACTIVE)
     
     def toggle_sync_pin(self) -> None:
         """Toggle the GPIO sync pin with a 10µs pulse."""
-        self.GPIO.output(self.sync_pin, self.GPIO.HIGH)
+        self.request.set_value(self.sync_pin, self.Value.ACTIVE)
         self.time.sleep(0.00001)  # 10 microsecond pulse
-        self.GPIO.output(self.sync_pin, self.GPIO.LOW)
+        self.request.set_value(self.sync_pin, self.Value.INACTIVE)
 
 
 class HardwareInterface:
