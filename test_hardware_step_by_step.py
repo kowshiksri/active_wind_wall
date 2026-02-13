@@ -1,33 +1,38 @@
 #!/usr/bin/env python3
-"""Step-by-step hardware diagnostic for the address-framed SPI stream."""
+"""
+STEP 2: Simple SPI PWM Control Test
+====================================
+
+WIRING (Raspberry Pi 5 → Pico 2):
+----------------------------------
+Pi Pin 19 (GPIO10 MOSI) → Pico Pin 25 (GP19)
+Pi Pin 23 (GPIO11 SCLK) → Pico Pin 24 (GP18)
+Pi Pin 22 (GPIO25 CS*)  → Pico Pin 22 (GP17)  *Manual CS
+Pi Pin 25 (GND)         → Pico Pin 18 (GND)
+
+OSCILLOSCOPE:
+-------------
+Probe: Pico Pin 19 (GP14) - PWM output
+
+WHAT THIS DOES:
+---------------
+Sends simple 4-byte packets: [0xAA, PWM_HIGH, PWM_LOW, 0x55]
+Tests PWM control from 1200 µs to 1900 µs
+LED on Pico blinks when packets are received
+"""
 
 import sys
 import time
-from typing import Dict, List, Tuple
 
-START_BYTE = 0xA5
-END_BYTE = 0x5A
-PICO_ID_BITS = 2
-MOTOR_ID_BITS = 4
-PICO_MASK = (1 << PICO_ID_BITS) - 1
-MOTOR_MASK = (1 << MOTOR_ID_BITS) - 1
-
-TOTAL_PICOS = 4
-MOTORS_PER_PICO = 9
-DEFAULT_PICO_ID = 0
-DEFAULT_MOTOR_ID = 0
-DEFAULT_IDLE_PWM = 1200
+# Simple packet format for Step 2
+START_BYTE = 0xAA
+END_BYTE = 0x55
 SAFE_MIN_PWM = 1000
-SAFE_MAX_PWM = 2000
-
-
-def encode_address(pico_id: int, motor_id: int) -> int:
-    pico_bits = (pico_id & PICO_MASK) << MOTOR_ID_BITS
-    motor_bits = motor_id & MOTOR_MASK
-    return pico_bits | motor_bits
+SAFE_MAX_PWM = 2700
 
 
 def clamp_pwm(pwm_us: int) -> int:
+    """Clamp PWM to safe range."""
     pwm_us = int(pwm_us)
     if pwm_us < SAFE_MIN_PWM:
         return SAFE_MIN_PWM
@@ -36,52 +41,28 @@ def clamp_pwm(pwm_us: int) -> int:
     return pwm_us
 
 
-def build_record(pico_id: int, motor_id: int, pwm_us: int) -> List[int]:
+def build_packet(pwm_us: int) -> list:
+    """Build 4-byte packet: [START, PWM_HIGH, PWM_LOW, END]."""
     pwm = clamp_pwm(pwm_us)
-    address = encode_address(pico_id, motor_id)
-    return [START_BYTE, address, pwm & 0xFF, (pwm >> 8) & 0xFF, END_BYTE]
-
-
-def build_frame(records: List[Tuple[int, int, int]]) -> List[int]:
-    frame: List[int] = []
-    for pico_id, motor_id, pwm_us in records:
-        frame.extend(build_record(pico_id, motor_id, pwm_us))
-    return frame
-
-
-def build_full_bus_frame(target_map: Dict[Tuple[int, int], int]) -> List[int]:
-    records: List[Tuple[int, int, int]] = []
-    for pico_id in range(TOTAL_PICOS):
-        for motor_id in range(MOTORS_PER_PICO):
-            pwm = target_map.get((pico_id, motor_id), DEFAULT_IDLE_PWM)
-            records.append((pico_id, motor_id, pwm))
-    return build_frame(records)
-
-
-def describe_frame(frame: List[int], max_records: int = 5) -> None:
-    record_count = len(frame) // 5
-    print(f"Frame has {len(frame)} bytes ({record_count} records)")
-    preview = min(record_count, max_records)
-    for idx in range(preview):
-        rec = frame[idx * 5 : (idx + 1) * 5]
-        addr = rec[1]
-        pico_id = (addr >> MOTOR_ID_BITS) & PICO_MASK
-        motor_id = addr & MOTOR_MASK
-        pwm = rec[2] | (rec[3] << 8)
-        print(f"  Record {idx:02d}: Pico {pico_id}, Motor {motor_id} -> {pwm} us")
-    if record_count > preview:
-        print(f"  ... {record_count - preview} more records suppressed ...")
+    return [START_BYTE, (pwm >> 8) & 0xFF, pwm & 0xFF, END_BYTE]
 
 
 print("=" * 70)
-print("Hardware Diagnostic Test - Addressed SPI Stream")
+print("STEP 2: Simple SPI PWM Control Test")
+print("=" * 70)
+print("\nWIRING CHECK:")
+print("  Pi GPIO10 (MOSI, Pin 19) → Pico GP19 (Pin 25)")
+print("  Pi GPIO11 (SCLK, Pin 23) → Pico GP18 (Pin 24)")
+print("  Pi GPIO25 (CS,   Pin 22) → Pico GP17 (Pin 22)")
+print("  Pi GND    (Pin 25)       → Pico GND  (Pin 18)")
+print("\nOscilloscope: Probe Pico GP14 (Pin 19) for PWM output")
 print("=" * 70)
 
 print("\n[Step 1] Testing imports...")
 try:
     import spidev
     print("✓ spidev imported")
-except ImportError as exc:  # pragma: no cover
+except ImportError as exc:
     print(f"✗ spidev import failed: {exc}")
     sys.exit(1)
 
@@ -89,27 +70,24 @@ try:
     import gpiod
     from gpiod.line import Direction, Value
     print("✓ gpiod imported")
-except ImportError as exc:  # pragma: no cover
+except ImportError as exc:
     print(f"✗ gpiod import failed: {exc}")
     sys.exit(1)
 
-print("\n[Step 2] Initializing GPIO pins...")
+print("\n[Step 2] Initializing GPIO for manual CS...")
 try:
     gpio_chip = "/dev/gpiochip4"
-    sync_pin = 22
-    cs_pin = 25  # Manual chip select (physical pin 22)
+    cs_pin = 25  # Manual chip select
 
     config = {
-        sync_pin: gpiod.LineSettings(direction=Direction.OUTPUT),
         cs_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),
     }
 
-    gpio_request = gpiod.request_lines(gpio_chip, consumer="hardware-test", config=config)
-    gpio_request.set_value(sync_pin, Value.INACTIVE)
-    gpio_request.set_value(cs_pin, Value.ACTIVE)
+    gpio_request = gpiod.request_lines(gpio_chip, consumer="spi-test", config=config)
+    gpio_request.set_value(cs_pin, Value.ACTIVE)  # CS high (idle)
 
-    print(f"✓ GPIO initialized: Sync={sync_pin}, Manual CS={cs_pin}")
-except Exception as exc:  # pragma: no cover
+    print(f"✓ GPIO initialized: Manual CS on GPIO{cs_pin}")
+except Exception as exc:
     print(f"✗ GPIO initialization failed: {exc}")
     print("  Hint: Run with sudo")
     sys.exit(1)
@@ -122,76 +100,42 @@ try:
     spi.mode = 0
     spi.bits_per_word = 8
     print("✓ SPI initialized: 1 MHz, Mode 0")
-except Exception as exc:  # pragma: no cover
+except Exception as exc:
     print(f"✗ SPI initialization failed: {exc}")
     sys.exit(1)
 
 
-def send_frame(frame: List[int]) -> None:
-    gpio_request.set_value(cs_pin, Value.INACTIVE)
-    spi.writebytes(frame)
-    gpio_request.set_value(cs_pin, Value.ACTIVE)
+def send_packet(packet: list) -> None:
+    """Send packet with manual CS toggle."""
+    gpio_request.set_value(cs_pin, Value.INACTIVE)  # CS low
+    spi.writebytes(packet)
+    gpio_request.set_value(cs_pin, Value.ACTIVE)    # CS high
 
 
-def pulse_sync(duration_s: float = 10e-6) -> None:
-    gpio_request.set_value(sync_pin, Value.ACTIVE)
-    time.sleep(duration_s)
-    gpio_request.set_value(sync_pin, Value.INACTIVE)
+print("\n[Step 4] Testing PWM control...")
+test_values = [1200, 1400, 1500, 1700, 1900]
 
-
-print("\n[Step 4] Building single-motor diagnostic frame...")
-try:
-    pwm_value = 1500
-    single_frame = build_frame([(DEFAULT_PICO_ID, DEFAULT_MOTOR_ID, pwm_value)])
-    describe_frame(single_frame, max_records=1)
-except Exception as exc:  # pragma: no cover
-    print(f"✗ Frame build failed: {exc}")
-    sys.exit(1)
-
-print("\n[Step 5] Sending diagnostic frame via SPI...")
-input("  Press Enter to send frame (monitor Pico PWM output)...")
-try:
-    send_frame(single_frame)
-    print("✓ Frame sent")
-except Exception as exc:  # pragma: no cover
-    print(f"✗ SPI send failed: {exc}")
-    sys.exit(1)
-
-print("\n[Step 6] Sending sync trigger...")
-try:
-    pulse_sync()
-    print("✓ Sync pulse sent")
-except Exception as exc:  # pragma: no cover
-    print(f"✗ Sync trigger failed: {exc}")
-    sys.exit(1)
-
-print("\n[Step 7] Check oscilloscope now!")
-print("  Expected on Pico motor pin: ~1.5 ms pulse width")
-input("\n  Press Enter to sweep PWM values on the addressed bus...")
-
-print("\n[Step 8] Testing PWM sweep across full bus frame...")
-TEST_VALUES = [1100, 1300, 1500, 1700, 1900]
-
-for pwm in TEST_VALUES:
-    print(f"\n  Encoding PWM={pwm} us for Pico {DEFAULT_PICO_ID}, Motor {DEFAULT_MOTOR_ID}")
-    target_map = {(DEFAULT_PICO_ID, DEFAULT_MOTOR_ID): pwm}
-    full_frame = build_full_bus_frame(target_map)
-    describe_frame(full_frame)
-
+for pwm in test_values:
+    packet = build_packet(pwm)
+    print(f"\nSending PWM = {pwm} µs")
+    print(f"  Packet: {[hex(b) for b in packet]}")
+    
     try:
-        send_frame(full_frame)
-        time.sleep(0.001)
-        pulse_sync()
-        print("  ✓ Frame + sync dispatched. Observe PWM output.")
-        time.sleep(2)
-    except Exception as exc:  # pragma: no cover
+        send_packet(packet)
+        print(f"  ✓ Sent. Check oscilloscope for {pwm} µs pulse.")
+        time.sleep(2)  # Wait 2 seconds between tests
+    except Exception as exc:
         print(f"  ✗ Failed: {exc}")
         break
 
-print("\n[Step 9] Cleanup...")
+print("\n[Step 5] Cleanup...")
 try:
     spi.close()
     gpio_request.release()
     print("✓ Resources released")
-except Exception:  # pragma: no cover
+except Exception:
     pass
+
+print("\n" + "=" * 70)
+print("Test complete! Check oscilloscope for PWM changes.")
+print("=" * 70)
