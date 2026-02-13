@@ -74,23 +74,9 @@ except ImportError as exc:
     print(f"✗ gpiod import failed: {exc}")
     sys.exit(1)
 
-print("\n[Step 2] Initializing GPIO for manual CS...")
-try:
-    gpio_chip = "/dev/gpiochip4"
-    cs_pin = 25  # Manual chip select
-
-    config = {
-        cs_pin: gpiod.LineSettings(direction=Direction.OUTPUT, output_value=Value.ACTIVE),
-    }
-
-    gpio_request = gpiod.request_lines(gpio_chip, consumer="spi-test", config=config)
-    gpio_request.set_value(cs_pin, Value.ACTIVE)  # CS high (idle)
-
-    print(f"✓ GPIO initialized: Manual CS on GPIO{cs_pin}")
-except Exception as exc:
-    print(f"✗ GPIO initialization failed: {exc}")
-    print("  Hint: Run with sudo")
-    sys.exit(1)
+print("\n[Step 2] SPI will use hardware CS on GPIO8 (Pin 24)...")
+print("  Make sure Pico GP17 is connected to Pi Pin 24 (GPIO8)")
+input("  Press Enter when wiring is correct...")
 
 print("\n[Step 3] Initializing SPI...")
 try:
@@ -100,16 +86,15 @@ try:
     spi.mode = 0
     spi.bits_per_word = 8
     print("✓ SPI initialized: 1 MHz, Mode 0")
+    print(f"  Hardware CS (GPIO8) will toggle automatically")
 except Exception as exc:
     print(f"✗ SPI initialization failed: {exc}")
     sys.exit(1)
 
 
 def send_packet(packet: list) -> None:
-    """Send packet with manual CS toggle."""
-    gpio_request.set_value(cs_pin, Value.INACTIVE)  # CS low
+    """Send packet - hardware CS toggles automatically."""
     spi.writebytes(packet)
-    gpio_request.set_value(cs_pin, Value.ACTIVE)    # CS high
 
 
 print("\n[Step 4] Testing PWM control...")
