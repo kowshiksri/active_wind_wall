@@ -3,15 +3,13 @@
 #include "hardware/spi.h"
 
 // === CONFIGURATION ===
-// For single-motor test, keep NUM_MOTORS = 1 and only wire GPIO 14.
-// For full Pico, set NUM_MOTORS = 9 and update motor_pins accordingly.
-#define NUM_MOTORS 1
+#define NUM_MOTORS 2  // Change to 9 later
 #define SPI_BAUDRATE 1000000
 
 // Motor configuration: {GPIO pin, min_us, max_us}
-const uint motor_pins[NUM_MOTORS] = {14};
-const uint16_t motor_min_us[NUM_MOTORS] = {1200};
-const uint16_t motor_max_us[NUM_MOTORS] = {2700};
+const uint motor_pins[NUM_MOTORS] = {14, 15};
+const uint16_t motor_min_us[NUM_MOTORS] = {1200, 1200};
+const uint16_t motor_max_us[NUM_MOTORS] = {2700, 2700};
 
 // PWM variables
 uint pwm_slices[NUM_MOTORS];
@@ -26,21 +24,21 @@ uint16_t pwm_wrap;
 #define PIN_SCK  18
 #define PIN_MOSI 19
 
-// Sync trigger from Pi (GPIO input on Pico)
-#define PIN_SYNC 20
-
-// Packet format: [0xAA, PWM1_H, PWM1_L, ..., PWMn_H, PWMn_L, 0x55]
-#define PACKET_START 0xAA
-#define PACKET_END 0x55
-#define PACKET_BYTES (1 + (NUM_MOTORS * 2) + 1)
-
-// Set PWM for specific motor based on microsecond pulse width
-void set_motor_pwm_us(uint motor, uint16_t pulse_us) {
+// Set PWM for specific motor based on intensity (0-100)
+void set_motor_pwm(uint motor, uint8_t intensity) {
     if (motor >= NUM_MOTORS) return;
-
-    // Clamp pulse width to valid range
-    if (pulse_us < motor_min_us[motor]) pulse_us = motor_min_us[motor];
-    if (pulse_us > motor_max_us[motor]) pulse_us = motor_max_us[motor];
+    
+    // Calculate pulse width (min_us - max_us)
+    uint16_t pulse_us;
+    if (intensity == 0) {
+        pulse_us = motor_min_us[motor];
+    } else if (intensity >= 100) {
+        pulse_us = motor_max_us[motor];
+    } else {
+        // Linear mapping: intensity 0-100 -> min_us - max_us
+        pulse_us = motor_min_us[motor] + 
+                  ((uint32_t)intensity * (motor_max_us[motor] - motor_min_us[motor])) / 100;
+    }
     
     // Calculate PWM level (period is ~16ms = 16000µs)
     uint16_t level = (uint16_t)((pulse_us / 16000.0f) * (pwm_wrap + 1));
@@ -66,23 +64,13 @@ void init_all_pwms() {
         }
         
         // Start with minimum
-        set_motor_pwm_us(i, motor_min_us[i]);
+        set_motor_pwm(i, 0);
     }
     
     pwm_wrap = 31250;  // Common wrap value
 }
 
 // Main function
-volatile bool sync_triggered = false;
-volatile bool pending_valid = false;
-uint16_t pending_pwm[NUM_MOTORS];
-
-void on_sync_edge(uint gpio, uint32_t events) {
-    if (gpio == PIN_SYNC && (events & GPIO_IRQ_EDGE_RISE)) {
-        sync_triggered = true;
-    }
-}
-
 int main() {
     // Initialize all PWMs
     init_all_pwms();
@@ -97,37 +85,19 @@ int main() {
     gpio_set_function(PIN_CS, GPIO_FUNC_SPI);
     gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
     gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
-
-    // Setup sync pin (input with pull-down) and IRQ
-    gpio_init(PIN_SYNC);
-    gpio_set_dir(PIN_SYNC, GPIO_IN);
-    gpio_pull_down(PIN_SYNC);
-    gpio_set_irq_enabled_with_callback(PIN_SYNC, GPIO_IRQ_EDGE_RISE, true, &on_sync_edge);
     
     // Main loop
-    uint8_t packet[PACKET_BYTES];
-
+    uint8_t motor_data[NUM_MOTORS];
+    
     while (true) {
-        // Read a full packet from SPI (blocking)
-        spi_read_blocking(SPI_INST, 0, packet, PACKET_BYTES);
-
-        // Validate packet framing
-        if (packet[0] == PACKET_START && packet[PACKET_BYTES - 1] == PACKET_END) {
-            for (int i = 0; i < NUM_MOTORS; i++) {
-                int idx = 1 + (i * 2);
-                uint16_t pwm_us = (uint16_t)((packet[idx] << 8) | packet[idx + 1]);
-                pending_pwm[i] = pwm_us;
-            }
-            pending_valid = true;
+        // Read data for all motors from SPI
+        for (int i = 0; i < NUM_MOTORS; i++) {
+            spi_read_blocking(SPI_INST, 0, &motor_data[i], 1);
         }
-
-        // Apply update only on sync trigger
-        if (sync_triggered && pending_valid) {
-            sync_triggered = false;
-            for (int i = 0; i < NUM_MOTORS; i++) {
-                set_motor_pwm_us(i, pending_pwm[i]);
-            }
-            pending_valid = false;
+        
+        // Update all motors
+        for (int i = 0; i < NUM_MOTORS; i++) {
+            set_motor_pwm(i, motor_data[i]);
         }
     }
 }
