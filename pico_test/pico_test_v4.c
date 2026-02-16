@@ -8,12 +8,10 @@
 #define PIN_CSN 17 
 #define PIN_SCK 18 
 
-// --- CONFIGURATION ---
-// Change this for each Pico (0x01, 0x02, 0x03, 0x04)
 #define MY_PICO_ID  0x01 
-#define SYNC_ID     0xFF  // The "Go" signal for everyone
+#define SYNC_ID     0xFF 
 
-// PWM Limits
+// PWM Config
 #define PWM_MIN 1000
 #define PWM_MAX 2000
 #define PWM_DEFAULT 1500
@@ -38,31 +36,47 @@ int main() {
     gpio_set_function(PIN_CSN, GPIO_FUNC_SPI);
     gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
 
-    // 4. DATA BUFFERS
-    uint8_t rx_buffer[2];   // We expect [Address, Value]
-    uint16_t pending_pwm = PWM_DEFAULT; // "Shadow" buffer (Waiting for trigger)
+    // Data Buffers
+    uint8_t rx_buffer[2]; 
+    uint16_t pending_pwm = PWM_DEFAULT;
+    
+    // Heartbeat Timers
+    uint64_t last_heartbeat = 0;
+    bool led_state = false;
 
     while (true) {
-        // We now wait for 2 bytes: [Address, Data]
+        // --- A. READ SPI (Non-blocking check) ---
+        // We only read if 2 bytes are actually available in the buffer
         if (spi_is_readable(SPI_PORT) >= 2) {
             spi_read_blocking(SPI_PORT, 0, rx_buffer, 2);
 
             uint8_t addr = rx_buffer[0];
             uint8_t data = rx_buffer[1];
 
-            // CASE A: Addressed to ME? -> Store it, don't show it.
+            // 1. Store Data
             if (addr == MY_PICO_ID) {
-                // Convert 0-255 to 1000-2000us
                 pending_pwm = PWM_MIN + ((uint32_t)data * (PWM_MAX - PWM_MIN)) / 255;
             }
 
-            // CASE B: Is it the SYNC signal? -> Apply the stored value.
+            // 2. Sync Trigger
             if (addr == SYNC_ID) {
                 pwm_set_chan_level(slice_num, pwm_gpio_to_channel(MOTOR_PIN), pending_pwm);
                 
-                // Toggle LED on Sync so we can see it's working
-                gpio_put(LED_PIN, !gpio_get(LED_PIN)); 
+                // VISUAL FEEDBACK: Force LED toggle immediately on sync
+                led_state = !led_state;
+                gpio_put(LED_PIN, led_state);
             }
+        }
+
+        // --- B. HEARTBEAT (If no data is coming, blink slowly) ---
+        // This confirms the board is powered and loop is running
+        uint64_t now = time_us_64();
+        if (now - last_heartbeat > 500000) { // Every 500ms
+             // Only blink if we haven't toggled recently from a Sync
+             // (This creates a "nervous" blink when data flows, slow blink when idle)
+             led_state = !led_state;
+             gpio_put(LED_PIN, led_state);
+             last_heartbeat = now;
         }
     }
 }
