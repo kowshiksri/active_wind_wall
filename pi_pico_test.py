@@ -1,35 +1,38 @@
 import spidev
 import time
 
-# SPI Setup
 spi = spidev.SpiDev()
-spi.open(0, 0) # Bus 0, Device 0 (CE0)
+spi.open(0, 0) 
 spi.max_speed_hz = 1000000 
 spi.mode = 0
 
-print("Sending Sweeping Data (0-255). Press Ctrl+C to stop.")
+PICO_ID = 0x01
+SYNC_ID = 0xFF
+
+print("Sending Buffered Data. Motor updates ONLY on Sync.")
 
 try:
     val = 0
-    direction = 1
-    
     while True:
-        # Send the current value as a single byte
-        spi.xfer2([val])
+        # Step 1: Send Data to the specific Pico (Address 0x01)
+        # The Pico receives this, but ignores it (stores it in RAM)
+        spi.xfer2([PICO_ID, val])
         
-        # Print for debug visibility
-        # 0 = 1000us, 127 = ~1500us, 255 = 2000us
-        print(f"Sent: {val} (Approx PWM: {1000 + (val*1000)//255} us)")
+        # NOTE: At this exact moment, the motor has NOT moved yet.
+        # This simulates filling the buffer of all 4 Picos.
+        
+        # Step 2: Send the Global Sync Command (Address 0xFF)
+        # Now the Pico moves the value from RAM to the Motor
+        spi.xfer2([SYNC_ID, 0x00]) # Data byte is ignored during sync
+        
+        print(f"Loaded: {val} -> SENT SYNC")
 
-        # Increment value to create a sweep effect
-        val += 5
-        if val > 255:
-            val = 0
+        # Ramp logic
+        val += 10
+        if val > 255: val = 0
             
-        # Update rate: 20Hz (Sleep 0.05s)
-        # If you stop this script, the Pico watchdog should trigger after 0.1s
+        # This sleep determines your update frequency (e.g., 0.05s = 20Hz)
         time.sleep(0.05) 
 
 except KeyboardInterrupt:
     spi.close()
-    print("\nStopped. Pico should revert to 1500us (Default).")
