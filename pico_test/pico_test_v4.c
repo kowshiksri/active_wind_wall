@@ -44,38 +44,51 @@ int main() {
     uint64_t last_heartbeat = 0;
     bool led_state = false;
 
+    // Simple State Machine variables
+    bool waiting_for_data = false;
+
     while (true) {
-        // --- A. READ SPI (Non-blocking check) ---
-        // We only read if 2 bytes are actually available in the buffer
-        if (spi_is_readable(SPI_PORT) >= 2) {
-            spi_read_blocking(SPI_PORT, 0, rx_buffer, 2);
+        // Only check if data is actually there
+        if (spi_is_readable(SPI_PORT)) {
+            
+            // 1. Read ONE byte only
+            uint8_t received_byte = 0;
+            spi_read_blocking(SPI_PORT, 0, &received_byte, 1);
 
-            uint8_t addr = rx_buffer[0];
-            uint8_t data = rx_buffer[1];
-
-            // 1. Store Data
-            if (addr == MY_PICO_ID) {
-                pending_pwm = PWM_MIN + ((uint32_t)data * (PWM_MAX - PWM_MIN)) / 255;
-            }
-
-            // 2. Sync Trigger
-            if (addr == SYNC_ID) {
-                pwm_set_chan_level(slice_num, pwm_gpio_to_channel(MOTOR_PIN), pending_pwm);
+            // 2. Logic: What is this byte?
+            if (waiting_for_data) {
+                // If we were waiting for data, THIS is the data
+                // Map 0-255 -> 1000-2000us
+                pending_pwm = PWM_MIN + ((uint32_t)received_byte * (PWM_MAX - PWM_MIN)) / 255;
                 
-                // VISUAL FEEDBACK: Force LED toggle immediately on sync
-                led_state = !led_state;
-                gpio_put(LED_PIN, led_state);
+                // Reset state to wait for next Address
+                waiting_for_data = false;
+                
+            } else {
+                // We are idle. Is this an Address or a Sync?
+                
+                if (received_byte == MY_PICO_ID) {
+                    // Valid Address! The NEXT byte will be data.
+                    waiting_for_data = true;
+                }
+                
+                else if (received_byte == SYNC_ID) {
+                    // SYNC! Apply the shadow value to the motor
+                    pwm_set_chan_level(slice_num, pwm_gpio_to_channel(MOTOR_PIN), pending_pwm);
+                    
+                    // Flash LED rapidly to show we got a Sync
+                    gpio_put(LED_PIN, !gpio_get(LED_PIN)); 
+                }
+                
+                // If it's neither (noise or wrong ID), we just ignore it 
+                // and loop back to catch the next real byte.
             }
         }
 
-        // --- B. HEARTBEAT (If no data is coming, blink slowly) ---
-        // This confirms the board is powered and loop is running
+        // Keep the heartbeat alive (1Hz)
         uint64_t now = time_us_64();
-        if (now - last_heartbeat > 500000) { // Every 500ms
-             // Only blink if we haven't toggled recently from a Sync
-             // (This creates a "nervous" blink when data flows, slow blink when idle)
-             led_state = !led_state;
-             gpio_put(LED_PIN, led_state);
+        if (now - last_heartbeat > 500000) {
+             gpio_put(LED_PIN, !gpio_get(LED_PIN));
              last_heartbeat = now;
         }
     }
