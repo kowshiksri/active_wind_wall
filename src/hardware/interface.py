@@ -284,7 +284,7 @@ class HardwareInterface:
     
     def send_pwm(self, pwm_values: np.ndarray) -> None:
         """
-        Send PWM values to all 4 Picos using SPI with manual chip select.
+        Send PWM values to all Picos using a single broadcast SPI frame.
         Then trigger sync pulse on GPIO 22.
         
         Args:
@@ -292,25 +292,23 @@ class HardwareInterface:
         """
         self.frames_sent += 1
         
-        # Send to each Pico sequentially
-        for pico_id in sorted(self.pico_id_to_motors.keys()):
-            # Build packet for this Pico
-            packet = self._build_pico_packet(pwm_values, pico_id)
-            
-            # Select this Pico (CS LOW)
-            cs_pin = self.cs_pins[pico_id]
-            self.gpio.set_cs_low(cs_pin)
-            
-            # Send packet via SPI
-            try:
-                self.spi.write_bytes(packet)
-            except Exception as e:
-                print(f"[HW] ERROR: Pico{pico_id} send failed: {e}")
-            
-            # Deselect this Pico (CS HIGH)
-            self.gpio.set_cs_high(cs_pin)
+        # Build a single broadcast packet for all 36 motors
+        packet: List[int] = [PACKET_START]
+        for motor_id in range(36):
+            pwm = int(pwm_values[motor_id])
+            pwm = max(PWM_MIN, min(PWM_MAX, pwm))
+            high_byte = (pwm >> 8) & 0xFF
+            low_byte = pwm & 0xFF
+            packet.extend([high_byte, low_byte])
+        packet.append(PACKET_END)
+
+        # Send packet via SPI (single transaction)
+        try:
+            self.spi.write_bytes(packet)
+        except Exception as e:
+            print(f"[HW] ERROR: Broadcast send failed: {e}")
         
-        # Trigger sync pulse after all Picos have received data
+        # Trigger sync pulse after broadcast frame is sent
         try:
             self.gpio.toggle_sync_pin()
         except Exception as e:
