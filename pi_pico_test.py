@@ -1,38 +1,44 @@
 import spidev
+import RPi.GPIO as GPIO
 import time
 
+# SPI Setup
 spi = spidev.SpiDev()
-spi.open(0, 0) 
+spi.open(0, 0)
 spi.max_speed_hz = 1000000 
-spi.mode = 0
 
-PICO_ID = 0x01
-SYNC_ID = 0xFF
+# TRIGGER Pin Setup
+TRIGGER_PIN = 25
+GPIO.setmode(GPIO.BCM)
+GPIO.setup(TRIGGER_PIN, GPIO.OUT)
+GPIO.output(TRIGGER_PIN, 0) # Start Low
 
-print("Sending Buffered Data. Motor updates ONLY on Sync.")
+print("Sending Data... Motor only moves when Trigger pulses.")
 
 try:
     val = 0
     while True:
-        # Step 1: Send Data to the specific Pico (Address 0x01)
-        # The Pico receives this, but ignores it (stores it in RAM)
-        spi.xfer2([PICO_ID, val])
+        # 1. LOAD: Send the data over SPI
+        # The Pico receives this and updates 'next_pwm_val', but motor doesn't move.
+        spi.xfer2([val])
         
-        # NOTE: At this exact moment, the motor has NOT moved yet.
-        # This simulates filling the buffer of all 4 Picos.
-        
-        # Step 2: Send the Global Sync Command (Address 0xFF)
-        # Now the Pico moves the value from RAM to the Motor
-        spi.xfer2([SYNC_ID, 0x00]) # Data byte is ignored during sync
-        
-        print(f"Loaded: {val} -> SENT SYNC")
+        # Small delay to ensure SPI transmission is totally done
+        # (In reality this can be microseconds)
+        time.sleep(0.001) 
 
-        # Ramp logic
-        val += 10
+        # 2. FIRE: Pulse the Trigger Line
+        # This tells ALL connected Picos to update simultaneously
+        GPIO.output(TRIGGER_PIN, 1)
+        # Short pulse is enough (pico is fast)
+        time.sleep(0.0001) 
+        GPIO.output(TRIGGER_PIN, 0)
+
+        print(f"Loaded {val} -> FIRED Trigger")
+        
+        val += 5
         if val > 255: val = 0
-            
-        # This sleep determines your update frequency (e.g., 0.05s = 20Hz)
-        time.sleep(0.05) 
+        time.sleep(0.05) # 20Hz update rate
 
 except KeyboardInterrupt:
     spi.close()
+    GPIO.cleanup()
