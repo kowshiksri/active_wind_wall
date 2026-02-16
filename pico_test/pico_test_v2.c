@@ -21,7 +21,7 @@ int main() {
     pwm_set_wrap(slice_num, 15999); 
 
     // Set the default safe output to exactly 1200 microseconds
-    pwm_set_chan_level(slice_num, pwm_gpio_to_channel(MOTOR_PIN), 1200); 
+    pwm_set_chan_level(slice_num, pwm_gpio_to_channel(MOTOR_PIN), 1500); 
 
     // Turn the PWM generator on
     pwm_set_enabled(slice_num, true); 
