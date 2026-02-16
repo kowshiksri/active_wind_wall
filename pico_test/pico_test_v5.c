@@ -94,16 +94,7 @@ int main() {
     // Initialize components
     init_motors();
     init_spi_slave();
-    
-    printf("\n========================================\n");
-    printf("Pico Test v5 - SPI Slave PWM Control\n");
-    printf("========================================\n");
-    printf("Motor 1: GPIO14, PWM range 1000-2000µs\n");
-    printf("Motor 2: GPIO15, PWM range 1000-2000µs\n");
-    printf("SPI Slave Mode: 1 MHz, Mode 0\n");
-    printf("GPIO17: CS, GPIO16: MOSI, GPIO18: Clock\n");
-    printf("========================================\n\n");
-    
+   
     uint32_t last_packet_count = 0;
     uint32_t update_counter = 0;
     
@@ -126,8 +117,6 @@ int main() {
                 float pwm_us_m1 = (pwm_value_m1 / 16000.0f) * 1000.0f;
                 float pwm_us_m2 = (pwm_value_m2 / 16000.0f) * 1000.0f;
                 
-                printf("Packet #%lu | M1: %u (%.1fµs) M2: %u (%.1fµs) | Raw: 0x%02X\n",
-                       packet_count, pwm_value_m1, pwm_us_m1, pwm_value_m2, pwm_us_m2, received_byte);
             }
         }
         
