@@ -140,10 +140,17 @@ class HardwareInterface:
         # Flatten all 36 motors into the packet sequentially
         # Assuming pwm_values is indexed 0..35
         for pwm in pwm_values:
-            val = int(max(PWM_MIN, min(PWM_MAX, pwm)))
-            packet.append((val >> 8) & 0xFF) # High Byte
-            packet.append(val & 0xFF)        # Low Byte
-            
+        #     val = int(max(PWM_MIN, min(PWM_MAX, pwm)))
+        #     packet.append((val >> 8) & 0xFF) # High Byte
+        #     packet.append(val & 0xFF)        # Low Byte
+            # 1. Clip the value to your range
+            pwm_val = max(1200, min(2000, pwm))
+            # 2. Map 1200-2000 -> 0-255
+            byte_val = int((pwm_val - 1200) * 255 / 800)
+
+            # 3. Add to packet
+            packet.append(byte_val)
+        
         packet.append(PACKET_END)
 
         # 2. Send Stream (No CS toggling needed)

@@ -32,7 +32,7 @@ static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 #define PACKET_START 0xAA
 #define PACKET_END   0x55
 #define TOTAL_MOTORS 36
-#define BYTES_PER_MOTOR 2
+#define BYTES_PER_MOTOR 1
 
 // Byte Math for "Sniffer"
 // Frame = [START, M0H, M0L, ... M35H, M35L, END]
@@ -68,12 +68,21 @@ void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
 
 void apply_next_frame(void) {
     for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-        // Reconstruct 16-bit value from buffer (Big Endian)
-        uint16_t high_byte = next_frame_buffer[i * 2];
-        uint16_t low_byte  = next_frame_buffer[i * 2 + 1];
-        uint16_t pwm_us    = (high_byte << 8) | low_byte;
+        // 1. Get the single byte (0 - 255)
+        uint8_t raw_val = next_frame_buffer[i]; // No bit shifting needed!
         
-        set_motor_pwm_us(i, pwm_us);
+        // 2. Map 0-255 to 1200-2000
+        // Formula: PWM = Min + (Raw * Range / 255)
+        // We use floating point for the intermediate calc to be precise, then cast back.
+        // Or use integer math: 1200 + (raw_val * 800) / 255
+        
+        uint16_t mapped_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
+        
+        // 3. Safety Fallback (just in case logic drifts, though mathematically hard to break)
+        if (mapped_pwm > 2000) mapped_pwm = 2000;
+        
+        // 4. Send to Motor
+        set_motor_pwm_us(i, mapped_pwm);
     }
 }
 
