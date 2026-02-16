@@ -141,43 +141,64 @@ int main() {
     bool header_found = false;
     uint8_t buffer_limit = MOTORS_PER_PICO * BYTES_PER_MOTOR;
 
+    
+    // TIMEOUT VARIABLES
+    absolute_time_t last_sync_time = get_absolute_time();
+    absolute_time_t last_spi_byte_time = get_absolute_time();
+    const uint64_t SAFETY_TIMEOUT_US = 200000; // 200ms (If no sync, kill motors)
+    const uint64_t FRAME_TIMEOUT_US = 5000;    // 5ms (If packet halts mid-way, reset)
+
     while (true) {
-        // --- A. SPI SNIFFER ---
+        // --- A. SPI SNIFFER WITH TIMEOUT ---
         if (spi_is_readable(SPI_INST)) {
             uint8_t rx;
             spi_read_blocking(SPI_INST, 0, &rx, 1);
+            last_spi_byte_time = get_absolute_time(); // Keep track of fresh data
 
             if (!header_found) {
                 if (rx == PACKET_START) {
                     header_found = true;
-                    frame_index = 1; // Header is byte 0
+                    frame_index = 1; 
                 }
             } else {
-                // We are inside a frame. Check if this byte belongs to US.
-                // Current 'frame_index' represents the position in the GLOBAL packet.
-                
-                // If index is within OUR range: [OFFSET ... OFFSET+17]
+                // We are inside a frame
                 if (frame_index >= OFFSET && frame_index < (OFFSET + buffer_limit)) {
-                    // Map global index to local buffer index (0..17)
                     next_frame_buffer[frame_index - OFFSET] = rx;
                 }
-
-                // Advance Counter
                 frame_index++;
 
-                // Reset on End Byte or Overflow
-                // (74 bytes is standard frame size: 1+72+1)
+                // End of Packet Check
                 if (rx == PACKET_END || frame_index > 100) {
                     header_found = false;
                     frame_index = 0;
                 }
+            }
+        } else {
+            // SPI RESET: If we found a header but haven't seen a byte for 5ms, reset.
+            // This prevents getting stuck waiting for a byte that never comes.
+            if (header_found && absolute_time_diff_us(last_spi_byte_time, get_absolute_time()) > FRAME_TIMEOUT_US) {
+                header_found = false;
+                frame_index = 0;
             }
         }
 
         // --- B. UPDATE MOTORS (ON SYNC) ---
         if (sync_pulse_detected) {
             sync_pulse_detected = false;
+            last_sync_time = get_absolute_time(); // Pet the watchdog
             apply_next_frame();
         }
+
+        // --- C. SAFETY WATCHDOG (The "Experiment Over" Fix) ---
+        // If we haven't seen a SYNC pulse for 200ms, force everything to 1000us
+        if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
+             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+                 // Force Safe State
+                 set_motor_pwm_us(i, 1000);
+             }
+             // Optional: Blink LED fast to show "Safety Mode"
+             gpio_put(LED_PIN, (to_ms_since_boot(get_absolute_time()) % 200) < 100);
+        }
     }
+    return 0;
 }
