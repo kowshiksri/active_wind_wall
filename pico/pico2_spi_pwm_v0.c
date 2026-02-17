@@ -165,7 +165,18 @@ int main() {
             uint8_t rx;
             spi_read_blocking(SPI_INST, 0, &rx, 1);
             last_spi_byte_time = get_absolute_time(); // Keep track of fresh data
-
+            
+            // === DIAGNOSTIC: COUNT RAW BYTES RECEIVED ===
+            // Blink LED once per 38 bytes (one full packet worth)
+            // At 1Hz send rate: LED blinks ~1/sec if SPI is working
+            // No blink at all: SPI receive is broken
+            static uint32_t raw_byte_count = 0;
+            raw_byte_count++;
+            if (raw_byte_count >= 38) {
+                raw_byte_count = 0;
+                gpio_xor_mask(1u << LED_PIN);  // Toggle LED
+            }
+            // === END DIAGNOSTIC ===
             if (!header_found) {
                 if (rx == PACKET_START) {
                     header_found = true;
