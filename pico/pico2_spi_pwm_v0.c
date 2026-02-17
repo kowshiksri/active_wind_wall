@@ -23,10 +23,10 @@ static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 
 // SPI configuration
 #define SPI_INST spi0
-#define PIN_MISO 16 
+#define PIN_MISO 19 
 #define PIN_CS   17 
 #define PIN_SCK  18 
-#define PIN_MOSI 19 
+#define PIN_MOSI 16 
 
 // Packet Protocol
 #define PACKET_START 0xAA
@@ -100,10 +100,10 @@ void sync_irq_handler(uint gpio, uint32_t events) {
         // Toggle LED every 20 frames (approx 20Hz blink at 400Hz refresh)
         // This confirms the SYNC line is actually firing
         sync_counter++;
-        // if (sync_counter >= 20) {
-        //     gpio_xor_mask(1u << LED_PIN);
-        //     sync_counter = 0;
-        // }
+        if (sync_counter >= 20) {
+            gpio_xor_mask(1u << LED_PIN);
+            sync_counter = 0;
+        }
     }
 }
 
