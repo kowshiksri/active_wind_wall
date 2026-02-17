@@ -37,7 +37,7 @@ static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 // Byte Math for "Sniffer"
 // Frame = [START, M0H, M0L, ... M35H, M35L, END]
 // OFFSET = Index where THIS Pico's data starts
-#define OFFSET (2 + (PICO_ID * MOTORS_PER_PICO * BYTES_PER_MOTOR))
+#define OFFSET ((PICO_ID * MOTORS_PER_PICO * BYTES_PER_MOTOR))
 
 // Sync (latch) pin
 #define SYNC_PIN 22
