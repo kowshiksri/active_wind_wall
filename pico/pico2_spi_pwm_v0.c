@@ -68,21 +68,23 @@ void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
 
 void apply_next_frame(void) {
     for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-        // 1. Get the single byte (0 - 255)
-        uint8_t raw_val = next_frame_buffer[i]; // No bit shifting needed!
+        uint8_t raw_val = next_frame_buffer[i];
         
-        // 2. Map 0-255 to 1200-2000
-        // Formula: PWM = Min + (Raw * Range / 255)
-        // We use floating point for the intermediate calc to be precise, then cast back.
-        // Or use integer math: 1200 + (raw_val * 800) / 255
-        
-        uint16_t mapped_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
-        
-        // 3. Safety Fallback (just in case logic drifts, though mathematically hard to break)
-        if (mapped_pwm > 2000) mapped_pwm = 2000;
-        
-        // 4. Send to Motor
-        set_motor_pwm_us(i, mapped_pwm);
+        uint16_t target_pwm;
+
+        // FIX: If value is 0, go to SAFE IDLE (1000)
+        // This prevents "Disconnect = 1200"
+        if (raw_val == 0) {
+            target_pwm = 1000;
+        } 
+        else {
+            // Map 1-255 -> 1200-2000
+            // Formula: 1200 + (raw_val * 800) / 255
+            target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
+        }
+
+        if (target_pwm > 2000) target_pwm = 2000;
+        set_motor_pwm_us(i, target_pwm);
     }
 }
 
@@ -98,10 +100,10 @@ void sync_irq_handler(uint gpio, uint32_t events) {
         // Toggle LED every 20 frames (approx 20Hz blink at 400Hz refresh)
         // This confirms the SYNC line is actually firing
         sync_counter++;
-        if (sync_counter >= 20) {
-            gpio_xor_mask(1u << LED_PIN);
-            sync_counter = 0;
-        }
+        // if (sync_counter >= 20) {
+        //     gpio_xor_mask(1u << LED_PIN);
+        //     sync_counter = 0;
+        // }
     }
 }
 
@@ -178,6 +180,12 @@ int main() {
 
                 // End of Packet Check
                 if (rx == PACKET_END || frame_index > 100) {
+                    // DEBUG: Only blink if we actually finished a packet!
+                    sync_counter++;
+                    if (sync_counter >= 20) {
+                        gpio_xor_mask(1u << LED_PIN);
+                        sync_counter = 0;
+                    }
                     header_found = false;
                     frame_index = 0;
                 }
