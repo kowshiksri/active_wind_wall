@@ -148,85 +148,146 @@ int main() {
     gpio_set_irq_enabled_with_callback(SYNC_PIN, GPIO_IRQ_EDGE_RISE, true, &sync_irq_handler);
 
     // Variables for SPI State Machine
-    int frame_index = 0;
-    bool header_found = false;
-    uint8_t buffer_limit = MOTORS_PER_PICO * BYTES_PER_MOTOR;
+    // int frame_index = 0;
+    // bool header_found = false;
+    // uint8_t buffer_limit = MOTORS_PER_PICO * BYTES_PER_MOTOR;
 
     
     // TIMEOUT VARIABLES
-    absolute_time_t last_sync_time = get_absolute_time();
+    // absolute_time_t last_sync_time = get_absolute_time();
+    // absolute_time_t last_spi_byte_time = get_absolute_time();
+    // const uint64_t SAFETY_TIMEOUT_US = 200000; // 200ms (If no sync, kill motors)
+    // const uint64_t FRAME_TIMEOUT_US = 5000;    // 5ms (If packet halts mid-way, reset)
+
+    // while (true) {
+    //     // --- A. SPI SNIFFER WITH TIMEOUT ---
+    //     if (spi_is_readable(SPI_INST)) {
+    //         uint8_t rx;
+    //         spi_read_blocking(SPI_INST, 0, &rx, 1);
+    //         last_spi_byte_time = get_absolute_time(); // Keep track of fresh data
+            
+    //         // === DIAGNOSTIC: COUNT RAW BYTES RECEIVED ===
+    //         // Blink LED once per 38 bytes (one full packet worth)
+    //         // At 1Hz send rate: LED blinks ~1/sec if SPI is working
+    //         // No blink at all: SPI receive is broken
+    //         static uint32_t raw_byte_count = 0;
+    //         raw_byte_count++;
+    //         if (raw_byte_count >= 38) {
+    //             raw_byte_count = 0;
+    //             gpio_xor_mask(1u << LED_PIN);  // Toggle LED
+    //         }
+    //         // === END DIAGNOSTIC ===
+    //         if (!header_found) {
+    //             if (rx == PACKET_START) {
+    //                 header_found = true;
+    //                 frame_index = 1; 
+    //             }
+    //         } else {
+    //             // We are inside a frame
+    //             if (frame_index >= OFFSET && frame_index < (OFFSET + buffer_limit)) {
+    //                 next_frame_buffer[frame_index - OFFSET] = rx;
+    //             }
+    //             frame_index++;
+
+    //             // End of Packet Check
+    //             if (rx == PACKET_END || frame_index > 100) {
+    //                 // DEBUG: Only blink if we actually finished a packet!
+    //                 sync_counter++;
+    //                 if (sync_counter >= 20) {
+    //                     gpio_xor_mask(1u << LED_PIN);
+    //                     sync_counter = 0;
+    //                 }
+    //                 header_found = false;
+    //                 frame_index = 0;
+    //             }
+    //         }
+    //     } else {
+    //         // SPI RESET: If we found a header but haven't seen a byte for 5ms, reset.
+    //         // This prevents getting stuck waiting for a byte that never comes.
+    //         if (header_found && absolute_time_diff_us(last_spi_byte_time, get_absolute_time()) > FRAME_TIMEOUT_US) {
+    //             header_found = false;
+    //             frame_index = 0;
+    //         }
+    //     }
+
+    //     // --- B. UPDATE MOTORS (ON SYNC) ---
+    //     if (sync_pulse_detected) {
+    //         sync_pulse_detected = false;
+    //         last_sync_time = get_absolute_time(); // Pet the watchdog
+    //         apply_next_frame();
+    //     }
+
+    //     // --- C. SAFETY WATCHDOG (The "Experiment Over" Fix) ---
+    //     // If we haven't seen a SYNC pulse for 200ms, force everything to 1000us
+    //     if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
+    //          for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+    //              // Force Safe State
+    //              set_motor_pwm_us(i, 1000);
+    //          }
+    //          // Optional: Blink LED fast to show "Safety Mode"
+    //         //  gpio_put(LED_PIN, (to_ms_since_boot(get_absolute_time()) % 200) < 100);
+    //     }
+    // }
+    // return 0;
+
+    // New simpler variables — remove old ones (frame_index, header_found, buffer_limit)
+    int byte_count = 0;
+    absolute_time_t last_sync_time    = get_absolute_time();
     absolute_time_t last_spi_byte_time = get_absolute_time();
-    const uint64_t SAFETY_TIMEOUT_US = 200000; // 200ms (If no sync, kill motors)
-    const uint64_t FRAME_TIMEOUT_US = 5000;    // 5ms (If packet halts mid-way, reset)
+    const uint64_t SAFETY_TIMEOUT_US  = 200000;
+    const uint64_t FRAME_TIMEOUT_US   = 5000;
+
+    // MY_START and MY_END: which byte positions in the 36-byte frame belong to this Pico
+    const int MY_START = PICO_ID * MOTORS_PER_PICO;          // Pico 0 = 0
+    const int MY_END   = MY_START + MOTORS_PER_PICO;          // Pico 0 = 9
 
     while (true) {
-        // --- A. SPI SNIFFER WITH TIMEOUT ---
+
+        // --- A. SPI RECEIVE: Fixed 36-byte frame, no start/end bytes ---
         if (spi_is_readable(SPI_INST)) {
             uint8_t rx;
             spi_read_blocking(SPI_INST, 0, &rx, 1);
-            last_spi_byte_time = get_absolute_time(); // Keep track of fresh data
-            
-            // === DIAGNOSTIC: COUNT RAW BYTES RECEIVED ===
-            // Blink LED once per 38 bytes (one full packet worth)
-            // At 1Hz send rate: LED blinks ~1/sec if SPI is working
-            // No blink at all: SPI receive is broken
-            static uint32_t raw_byte_count = 0;
-            raw_byte_count++;
-            if (raw_byte_count >= 38) {
-                raw_byte_count = 0;
-                gpio_xor_mask(1u << LED_PIN);  // Toggle LED
-            }
-            // === END DIAGNOSTIC ===
-            if (!header_found) {
-                if (rx == PACKET_START) {
-                    header_found = true;
-                    frame_index = 1; 
-                }
-            } else {
-                // We are inside a frame
-                if (frame_index >= OFFSET && frame_index < (OFFSET + buffer_limit)) {
-                    next_frame_buffer[frame_index - OFFSET] = rx;
-                }
-                frame_index++;
+            last_spi_byte_time = get_absolute_time();
 
-                // End of Packet Check
-                if (rx == PACKET_END || frame_index > 100) {
-                    // DEBUG: Only blink if we actually finished a packet!
-                    sync_counter++;
-                    if (sync_counter >= 20) {
-                        gpio_xor_mask(1u << LED_PIN);
-                        sync_counter = 0;
-                    }
-                    header_found = false;
-                    frame_index = 0;
-                }
+            // Only store bytes that belong to this Pico
+            if (byte_count >= MY_START && byte_count < MY_END) {
+                next_frame_buffer[byte_count - MY_START] = rx;
             }
-        } else {
-            // SPI RESET: If we found a header but haven't seen a byte for 5ms, reset.
-            // This prevents getting stuck waiting for a byte that never comes.
-            if (header_found && absolute_time_diff_us(last_spi_byte_time, get_absolute_time()) > FRAME_TIMEOUT_US) {
-                header_found = false;
-                frame_index = 0;
+
+            byte_count++;
+
+            // After 36 bytes, reset for next frame
+            if (byte_count >= TOTAL_MOTORS) {
+                byte_count = 0;
             }
         }
 
-        // --- B. UPDATE MOTORS (ON SYNC) ---
+        // Frame stall: if mid-frame and no byte for 5ms, realign
+        if (byte_count > 0 &&
+            absolute_time_diff_us(last_spi_byte_time, get_absolute_time()) > FRAME_TIMEOUT_US) {
+            byte_count = 0;
+        }
+
+        // --- B. APPLY ON SYNC ---
         if (sync_pulse_detected) {
             sync_pulse_detected = false;
-            last_sync_time = get_absolute_time(); // Pet the watchdog
+            last_sync_time = get_absolute_time();
             apply_next_frame();
+
+            // LED heartbeat: blink every 20 syncs (~20Hz visible blink at 400Hz)
+            sync_counter++;
+            if (sync_counter >= 20) {
+                gpio_xor_mask(1u << LED_PIN);
+                sync_counter = 0;
+            }
         }
 
-        // --- C. SAFETY WATCHDOG (The "Experiment Over" Fix) ---
-        // If we haven't seen a SYNC pulse for 200ms, force everything to 1000us
+        // --- C. SAFETY WATCHDOG ---
         if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
-             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                 // Force Safe State
-                 set_motor_pwm_us(i, 1000);
-             }
-             // Optional: Blink LED fast to show "Safety Mode"
-            //  gpio_put(LED_PIN, (to_ms_since_boot(get_absolute_time()) % 200) < 100);
+            for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+                set_motor_pwm_us(i, 1000);
+            }
+            gpio_put(LED_PIN, (to_ms_since_boot(get_absolute_time()) % 200) < 100);
         }
     }
-    return 0;
 }
