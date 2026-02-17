@@ -225,7 +225,7 @@ int main() {
                  set_motor_pwm_us(i, 1000);
              }
              // Optional: Blink LED fast to show "Safety Mode"
-             gpio_put(LED_PIN, (to_ms_since_boot(get_absolute_time()) % 200) < 100);
+            //  gpio_put(LED_PIN, (to_ms_since_boot(get_absolute_time()) % 200) < 100);
         }
     }
     return 0;
