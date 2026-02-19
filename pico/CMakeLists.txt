@@ -28,32 +28,32 @@ set(PICO_BOARD pico2 CACHE STRING "Board type")
 # Pull in Raspberry Pi Pico SDK (must be before project)
 include(pico_sdk_import.cmake)
 
-project(pico2_spi_pwm_v0 C CXX ASM)
+project(pico2_spi_pwm_v1 C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(pico2_spi_pwm_v0 pico2_spi_pwm_v0.c )
+add_executable(pico2_spi_pwm_v1 pico2_spi_pwm_v1.c )
 
-pico_set_program_name(pico2_spi_pwm_v0 "pico2_spi_pwm_v0")
-pico_set_program_version(pico2_spi_pwm_v0 "0.1")
+pico_set_program_name(pico2_spi_pwm_v1 "pico2_spi_pwm_v1")
+pico_set_program_version(pico2_spi_pwm_v1 "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(pico2_spi_pwm_v0 0)
-pico_enable_stdio_usb(pico2_spi_pwm_v0 0)
+pico_enable_stdio_uart(pico2_spi_pwm_v1 0)
+pico_enable_stdio_usb(pico2_spi_pwm_v1 0)
 
 # Add the standard library to the build
-target_link_libraries(pico2_spi_pwm_v0
+target_link_libraries(pico2_spi_pwm_v1
         pico_stdlib
         hardware_spi
         hardware_pwm
         hardware_dma)
 
 # Add the standard include files to the build
-target_include_directories(pico2_spi_pwm_v0 PRIVATE
+target_include_directories(pico2_spi_pwm_v1 PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
-pico_add_extra_outputs(pico2_spi_pwm_v0)
+pico_add_extra_outputs(pico2_spi_pwm_v1)
