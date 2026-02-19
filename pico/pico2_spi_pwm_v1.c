@@ -5,29 +5,26 @@
 #include <stdbool.h>
 
 // ==========================================
-// CONFIGURATION
+// CONFIG
 // ==========================================
-#define PICO_ID 0          // 0,1,2,3 for your 4 boards
+// Change this for each board: 0, 1, 2, 3
+#define PICO_ID 0
 
 #define MOTORS_PER_PICO 9
 static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0,1,2,3,4,5,6,7,8};
 
 #define LED_PIN 25
 
-// PWM settings
-#define PWM_DIVIDER 64.0f
-#define PWM_WRAP    31250
-
-// SPI: using SPI0 on Pico 2
+// SPI0 on Pico 2 (slave)
 #define SPI_INST spi0
-#define PIN_MISO 19   // SPI0 TX (Pico MISO -> Pi MISO)
-#define PIN_CS   17   // SPI0 CSn
+#define PIN_MISO 19   // SPI0 TX  (to Pi MISO)   - UNUSED for now
+#define PIN_CS   17   // SPI0 CSn (from Pi CE0)
 #define PIN_SCK  18   // SPI0 SCK
-#define PIN_MOSI 16   // SPI0 RX (Pico MOSI <- Pi MOSI)
+#define PIN_MOSI 16   // SPI0 RX  (from Pi MOSI)
 
-// Frame
-#define FRAME_BYTES 36
-#define TOTAL_MOTORS 36
+// Frame parameters
+#define TOTAL_MOTORS    36
+#define FRAME_BYTES     TOTAL_MOTORS
 
 #define MY_START (PICO_ID * MOTORS_PER_PICO)
 #define MY_END   (MY_START + MOTORS_PER_PICO)
@@ -39,12 +36,15 @@ static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0,1,2,3,4,5,6,7,8};
 uint slices[MOTORS_PER_PICO];
 uint channels[MOTORS_PER_PICO];
 
-static uint8_t frame_buffer[FRAME_BYTES];
-static volatile bool start_new_frame = false;
-
+// Latest values for this Pico's 9 motors
+volatile uint8_t motor_values[MOTORS_PER_PICO];
 volatile uint8_t active_frame_buffer[MOTORS_PER_PICO];
 
+volatile bool sync_pulse_detected = false;
 volatile uint32_t sync_counter = 0;
+
+// Global byte index in current 36-byte frame (0..35)
+volatile uint8_t byte_index = 0;
 
 // ==========================================
 // PWM CONTROL
@@ -53,8 +53,9 @@ void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
     if (pulse_us < 1000) pulse_us = 1000;
     if (pulse_us > 2000) pulse_us = 2000;
 
+    // 125 MHz / 64 ~= 1.953125 MHz -> ~2.34375 counts per us
     uint16_t level = (uint16_t)(pulse_us * 2.34375f);
-    if (level > PWM_WRAP) level = PWM_WRAP;
+    if (level > 31250) level = 31250;
 
     pwm_set_chan_level(slices[motor_index], channels[motor_index], level);
 }
@@ -64,8 +65,7 @@ void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
 // ==========================================
 void sync_irq_handler(uint gpio, uint32_t events) {
     if (gpio == SYNC_PIN) {
-        start_new_frame = true;
-
+        sync_pulse_detected = true;
         sync_counter++;
         if (sync_counter >= 20) {
             gpio_xor_mask(1u << LED_PIN);
@@ -85,7 +85,7 @@ int main() {
     gpio_set_dir(LED_PIN, GPIO_OUT);
     gpio_put(LED_PIN, 1);
 
-    // PWM
+    // PWM initialisation
     for (uint i = 0; i < MOTORS_PER_PICO; i++) {
         gpio_set_function(MOTOR_PINS[i], GPIO_FUNC_PWM);
         slices[i] = pwm_gpio_to_slice_num(MOTOR_PINS[i]);
@@ -95,57 +95,56 @@ int main() {
         pwm_set_wrap(slices[i], 31250);
         pwm_set_enabled(slices[i], true);
 
-        set_motor_pwm_us(i, 1000);
+        motor_values[i] = 0;
         active_frame_buffer[i] = 0;
+        set_motor_pwm_us(i, 1000);   // idle
     }
 
-    // SPI slave init
-    spi_init(SPI_INST, 1000000);     // baud ignored in slave mode
+    // SPI slave setup
+    spi_init(SPI_INST, 1000000);        // baud ignored in slave mode
     spi_set_slave(SPI_INST, true);
     gpio_set_function(PIN_MISO, GPIO_FUNC_SPI);
     gpio_set_function(PIN_CS,   GPIO_FUNC_SPI);
     gpio_set_function(PIN_SCK,  GPIO_FUNC_SPI);
     gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
 
-    // SYNC
+    // SYNC pin
     gpio_init(SYNC_PIN);
     gpio_set_dir(SYNC_PIN, GPIO_IN);
     gpio_pull_down(SYNC_PIN);
     gpio_set_irq_enabled_with_callback(SYNC_PIN, GPIO_IRQ_EDGE_RISE, true, &sync_irq_handler);
 
     absolute_time_t last_sync_time = get_absolute_time();
-    const uint64_t SAFETY_TIMEOUT_US = 200000; // 200ms
+    const uint64_t SAFETY_TIMEOUT_US = 200000; // 200 ms
 
     while (true) {
-        // A. When SYNC triggers, read exactly 36 bytes blocking
-        if (start_new_frame) {
-            start_new_frame = false;
+        // A. SPI RX: one byte at a time, count bytes in frame
+        while (spi_is_readable(SPI_INST)) {
+            uint8_t rx = (uint8_t)spi_get_hw(SPI_INST)->dr;
+
+            uint8_t idx = byte_index;
+            if (byte_index < FRAME_BYTES) {
+                byte_index++;
+            } else {
+                // extra bytes beyond 36 are ignored until next SYNC
+            }
+
+            if (idx >= MY_START && idx < MY_END) {
+                motor_values[idx - MY_START] = rx;
+            }
+        }
+
+        // B. On SYNC: latch values + apply PWM, then reset byte counter
+        if (sync_pulse_detected) {
+            sync_pulse_detected = false;
             last_sync_time = get_absolute_time();
 
-            // 1) Blocking read of 36 bytes
-            for (int i = 0; i < FRAME_BYTES; i++) {
-                // Wait until a byte is available
-                while (!spi_is_readable(SPI_INST)) {
-                    tight_loop_contents();
-                }
-                frame_buffer[i] = (uint8_t)spi_get_hw(SPI_INST)->dr;
-            }
-
-            // 2) Copy this Pico's bytes into active_frame_buffer
+            // Snapshot latest 9 values
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                uint idx = MY_START + i;  // 0..35
-                active_frame_buffer[i] = frame_buffer[idx];
+                active_frame_buffer[i] = motor_values[i];
             }
 
-            // 3) Pre-load these 9 bytes into TX FIFO for Pi readback
-            for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                while (!spi_is_writable(SPI_INST)) {
-                    tight_loop_contents();
-                }
-                spi_get_hw(SPI_INST)->dr = active_frame_buffer[i];
-            }
-
-            // 4) Apply PWM
+            // Apply PWM for this frame
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
                 uint8_t raw_val = active_frame_buffer[i];
 
@@ -158,9 +157,12 @@ int main() {
                 if (target_pwm > 2000) target_pwm = 2000;
                 set_motor_pwm_us(i, target_pwm);
             }
+
+            // Reset byte counter for next 36-byte frame
+            byte_index = 0;
         }
 
-        // B. Safety: if no sync for too long, go to idle PWM
+        // C. Safety watchdog
         if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
                 set_motor_pwm_us(i, 1000);
