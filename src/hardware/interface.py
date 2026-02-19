@@ -4,6 +4,7 @@ Updated for Shared SPI (Broadcast Mode) - No Chip Selects.
 """
 
 import platform
+import time
 from typing import List, Optional, Dict
 import numpy as np
 from config import MOTOR_TO_PICO_LOOKUP, PICO_MOTOR_MAP, PWM_MIN, PWM_MAX
@@ -164,11 +165,21 @@ class HardwareInterface:
         # packet.append(PACKET_END)
 
         # 2. Send Stream (No CS toggling needed)
+        # try:
+        #     self.spi.write_bytes(packet)
+        # except Exception as e:
+        #     print(f"[HW] SPI Write Error: {e}")
         try:
             self.spi.write_bytes(packet)
+            
+            # CRITICAL FIX: Wait for the 36 bytes to physically leave the Pi 5
+            # 36 bytes @ 1MHz = ~288us. We wait 350us to be completely safe.
+            t_end = time.perf_counter() + 0.00035
+            while time.perf_counter() < t_end:
+                pass
+                
         except Exception as e:
             print(f"[HW] SPI Write Error: {e}")
-            
         # 3. Trigger Sync (Latches data on all Picos at once)
         try:
             self.gpio.toggle_sync_pin()
