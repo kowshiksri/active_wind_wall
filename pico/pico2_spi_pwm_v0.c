@@ -46,6 +46,7 @@ static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 uint slices[MOTORS_PER_PICO];
 uint channels[MOTORS_PER_PICO];
 volatile uint8_t next_frame_buffer[MOTORS_PER_PICO * BYTES_PER_MOTOR];
+volatile uint8_t active_frame_buffer[MOTORS_PER_PICO];
 volatile bool sync_pulse_detected = false;
 volatile uint32_t sync_counter = 0;
 
@@ -66,27 +67,27 @@ void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
     pwm_set_chan_level(slices[motor_index], channels[motor_index], level);
 }
 
-void apply_next_frame(void) {
-    for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-        uint8_t raw_val = next_frame_buffer[i];
+// void apply_next_frame(void) {
+//     for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+//         uint8_t raw_val = next_frame_buffer[i];
         
-        uint16_t target_pwm;
+//         uint16_t target_pwm;
 
-        // FIX: If value is 0, go to SAFE IDLE (1000)
-        // This prevents "Disconnect = 1200"
-        if (raw_val == 0) {
-            target_pwm = 1000;
-        } 
-        else {
-            // Map 1-255 -> 1200-2000
-            // Formula: 1200 + (raw_val * 800) / 255
-            target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
-        }
+//         // FIX: If value is 0, go to SAFE IDLE (1000)
+//         // This prevents "Disconnect = 1200"
+//         if (raw_val == 0) {
+//             target_pwm = 1000;
+//         } 
+//         else {
+//             // Map 1-255 -> 1200-2000
+//             // Formula: 1200 + (raw_val * 800) / 255
+//             target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
+//         }
 
-        if (target_pwm > 2000) target_pwm = 2000;
-        set_motor_pwm_us(i, target_pwm);
-    }
-}
+//         if (target_pwm > 2000) target_pwm = 2000;
+//         set_motor_pwm_us(i, target_pwm);
+//     }
+// }
 
 // ==========================================
 // INTERRUPT HANDLER
@@ -146,89 +147,12 @@ int main() {
     // Use Pull Down so floating pin doesn't trigger random syncs
     gpio_pull_down(SYNC_PIN); 
     gpio_set_irq_enabled_with_callback(SYNC_PIN, GPIO_IRQ_EDGE_RISE, true, &sync_irq_handler);
-
-    // Variables for SPI State Machine
-    // int frame_index = 0;
-    // bool header_found = false;
-    // uint8_t buffer_limit = MOTORS_PER_PICO * BYTES_PER_MOTOR;
-
     
-    // TIMEOUT VARIABLES
-    // absolute_time_t last_sync_time = get_absolute_time();
-    // absolute_time_t last_spi_byte_time = get_absolute_time();
-    // const uint64_t SAFETY_TIMEOUT_US = 200000; // 200ms (If no sync, kill motors)
-    // const uint64_t FRAME_TIMEOUT_US = 5000;    // 5ms (If packet halts mid-way, reset)
-
-    // while (true) {
-    //     // --- A. SPI SNIFFER WITH TIMEOUT ---
-    //     if (spi_is_readable(SPI_INST)) {
-    //         uint8_t rx;
-    //         spi_read_blocking(SPI_INST, 0, &rx, 1);
-    //         last_spi_byte_time = get_absolute_time(); // Keep track of fresh data
-            
-    //         // === DIAGNOSTIC: COUNT RAW BYTES RECEIVED ===
-    //         // Blink LED once per 38 bytes (one full packet worth)
-    //         // At 1Hz send rate: LED blinks ~1/sec if SPI is working
-    //         // No blink at all: SPI receive is broken
-    //         static uint32_t raw_byte_count = 0;
-    //         raw_byte_count++;
-    //         if (raw_byte_count >= 38) {
-    //             raw_byte_count = 0;
-    //             gpio_xor_mask(1u << LED_PIN);  // Toggle LED
-    //         }
-    //         // === END DIAGNOSTIC ===
-    //         if (!header_found) {
-    //             if (rx == PACKET_START) {
-    //                 header_found = true;
-    //                 frame_index = 1; 
-    //             }
-    //         } else {
-    //             // We are inside a frame
-    //             if (frame_index >= OFFSET && frame_index < (OFFSET + buffer_limit)) {
-    //                 next_frame_buffer[frame_index - OFFSET] = rx;
-    //             }
-    //             frame_index++;
-
-    //             // End of Packet Check
-    //             if (rx == PACKET_END || frame_index > 100) {
-    //                 // DEBUG: Only blink if we actually finished a packet!
-    //                 sync_counter++;
-    //                 if (sync_counter >= 20) {
-    //                     gpio_xor_mask(1u << LED_PIN);
-    //                     sync_counter = 0;
-    //                 }
-    //                 header_found = false;
-    //                 frame_index = 0;
-    //             }
-    //         }
-    //     } else {
-    //         // SPI RESET: If we found a header but haven't seen a byte for 5ms, reset.
-    //         // This prevents getting stuck waiting for a byte that never comes.
-    //         if (header_found && absolute_time_diff_us(last_spi_byte_time, get_absolute_time()) > FRAME_TIMEOUT_US) {
-    //             header_found = false;
-    //             frame_index = 0;
-    //         }
-    //     }
-
-    //     // --- B. UPDATE MOTORS (ON SYNC) ---
-    //     if (sync_pulse_detected) {
-    //         sync_pulse_detected = false;
-    //         last_sync_time = get_absolute_time(); // Pet the watchdog
-    //         apply_next_frame();
-    //     }
-
-    //     // --- C. SAFETY WATCHDOG (The "Experiment Over" Fix) ---
-    //     // If we haven't seen a SYNC pulse for 200ms, force everything to 1000us
-    //     if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
-    //          for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-    //              // Force Safe State
-    //              set_motor_pwm_us(i, 1000);
-    //          }
-    //          // Optional: Blink LED fast to show "Safety Mode"
-    //         //  gpio_put(LED_PIN, (to_ms_since_boot(get_absolute_time()) % 200) < 100);
-    //     }
-    // }
-    // return 0;
+    // After the Sync Pin init (step 4), before the while loop:
+    for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+        next_frame_buffer[i] = 0;
+        active_frame_buffer[i] = 0;
+    }
 
     // New simpler variables — remove old ones (frame_index, header_found, buffer_limit)
     int byte_count = 0;
@@ -243,8 +167,9 @@ int main() {
 
     while (true) {
 
-        // --- A. SPI RECEIVE: Fixed 36-byte frame, no start/end bytes ---
-        if (spi_is_readable(SPI_INST)) {
+        // --- A. SPI RECEIVE: Drain FIFO as fast as possible ---
+        // Read ALL available bytes in one shot to prevent FIFO overflow
+        while (spi_is_readable(SPI_INST)) {
             uint8_t rx;
             spi_read_blocking(SPI_INST, 0, &rx, 1);
             last_spi_byte_time = get_absolute_time();
@@ -259,6 +184,7 @@ int main() {
             // After 36 bytes, reset for next frame
             if (byte_count >= TOTAL_MOTORS) {
                 byte_count = 0;
+                break; // Exit after completing one frame
             }
         }
 
@@ -272,9 +198,27 @@ int main() {
         if (sync_pulse_detected) {
             sync_pulse_detected = false;
             last_sync_time = get_absolute_time();
-            apply_next_frame();
-
-            // LED heartbeat: blink every 20 syncs (~20Hz visible blink at 400Hz)
+            
+            // ATOMIC COPY: Snapshot the incoming buffer
+            for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+                active_frame_buffer[i] = next_frame_buffer[i];
+            }
+            
+            // Now apply from the stable snapshot
+            for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+                uint8_t raw_val = active_frame_buffer[i];
+                
+                uint16_t target_pwm;
+                if (raw_val == 0) {
+                    target_pwm = 1000;
+                } else {
+                    target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
+                }
+                if (target_pwm > 2000) target_pwm = 2000;
+                set_motor_pwm_us(i, target_pwm);
+            }
+            
+            // LED heartbeat
             sync_counter++;
             if (sync_counter >= 20) {
                 gpio_xor_mask(1u << LED_PIN);
