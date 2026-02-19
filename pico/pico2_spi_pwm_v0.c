@@ -160,7 +160,7 @@ int main() {
     channel_config_set_write_increment(&c, true);
 
     // Pace DMA using SPI RX DREQ
-    channel_config_set_dreq(&c, spi_get_dreq(SPI_INST, true));
+    channel_config_set_dreq(&c, spi_get_dreq(SPI_INST, false));
 
     // Configure but DO NOT yet start; we’ll start right away below
     dma_channel_configure(
@@ -284,7 +284,7 @@ int main() {
                 if (target_pwm > 2000) target_pwm = 2000;
                 set_motor_pwm_us(i, target_pwm);
             }
-            
+
             // LED heartbeat
             sync_counter++;
             if (sync_counter >= 20) {
