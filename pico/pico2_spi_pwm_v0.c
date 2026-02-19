@@ -8,7 +8,7 @@
 // CONFIGURATION
 // ==========================================
 // CHANGE THIS FOR EACH PICO (0, 1, 2, or 3)
-#define PICO_ID 1   
+#define PICO_ID 0   
 
 // Motor PWM pins (9 motors per Pico)
 // Assumes contiguous pins for simplicity, adjust array if needed
