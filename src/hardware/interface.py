@@ -40,7 +40,7 @@ class RealSPI:
         # Open SPI0.0. Note: This CLAIMS GPIO 8 (CE0) automatically!
         self.spi.open(0, 0)
         self.spi.max_speed_hz = 1000000  # 1 MHz
-        self.spi.mode = 1
+        self.spi.mode = 0
         self.spi.bits_per_word = 8
         print("[SPI] Initialized SPI0 (GPIO10=MOSI, GPIO11=SCLK)")
     
