@@ -2,6 +2,7 @@
 #include "hardware/pwm.h"
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
+#include "hardware/dma.h"
 #include <stdbool.h>
 
 // ==========================================
@@ -29,8 +30,12 @@ static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 #define PIN_MOSI 16 
 
 // Packet Protocol
-#define PACKET_START 0xAA
-#define PACKET_END   0x55
+#define FRAME_BYTES 36      // one full broadcast frame from the Pi
+#define SPI_RX_DMA_CH -1    // will hold the DMA channel index
+static uint8_t spi_frame_buffer[FRAME_BYTES];
+static int spi_rx_dma_chan;
+// #define PACKET_START 0xAA
+// #define PACKET_END   0x55
 #define TOTAL_MOTORS 36
 #define BYTES_PER_MOTOR 1
 
@@ -141,6 +146,36 @@ int main() {
     gpio_set_function(PIN_SCK, GPIO_FUNC_SPI);
     gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
 
+    // 3.5 Configure DMA to read SPI RX into spi_frame_buffer
+    spi_rx_dma_chan = dma_claim_unused_channel(true);
+    dma_channel_config c = dma_channel_get_default_config(spi_rx_dma_chan);
+
+    // We are moving 8-bit data
+    channel_config_set_transfer_data_size(&c, DMA_SIZE_8);
+
+    // Read address does NOT increment (always read from SPI DR)
+    channel_config_set_read_increment(&c, false);
+
+    // Write address DOES increment (fills our buffer)
+    channel_config_set_write_increment(&c, true);
+
+    // Pace DMA using SPI RX DREQ
+    channel_config_set_dreq(&c, spi_get_dreq(SPI_INST, true));
+
+    // Configure but DO NOT yet start; we’ll start right away below
+    dma_channel_configure(
+        spi_rx_dma_chan,
+        &c,
+        spi_frame_buffer,                 // dst (write address in RAM)
+        &spi_get_hw(SPI_INST)->dr,        // src (SPI data register)
+        FRAME_BYTES,                      // number of bytes per frame
+        true                              // start immediately
+    );
+
+    // Enable RX DMA in the SPI block itself
+    spi_get_hw(SPI_INST)->dmacr = SPI_SSPDMACR_RXDMAE_BITS;
+
+
     // 4. Initialize Sync Pin
     gpio_init(SYNC_PIN);
     gpio_set_dir(SYNC_PIN, GPIO_IN);
@@ -169,31 +204,31 @@ int main() {
 
         // --- A. SPI RECEIVE: Drain FIFO natively without touching TX ---
         // Read ALL available bytes in one shot to prevent FIFO overflow
-        while (spi_is_readable(SPI_INST)) {
-            // Directly pop the hardware data register. This avoids spi_read_blocking
-            // trying to push dummy bytes into the TX FIFO and deadlocking the slave.
-            uint8_t rx = (uint8_t)spi_get_hw(SPI_INST)->dr;
-            last_spi_byte_time = get_absolute_time();
+        // while (spi_is_readable(SPI_INST)) {
+        //     // Directly pop the hardware data register. This avoids spi_read_blocking
+        //     // trying to push dummy bytes into the TX FIFO and deadlocking the slave.
+        //     uint8_t rx = (uint8_t)spi_get_hw(SPI_INST)->dr;
+        //     last_spi_byte_time = get_absolute_time();
 
-            // Only store bytes that belong to this Pico
-            if (byte_count >= MY_START && byte_count < MY_END) {
-                next_frame_buffer[byte_count - MY_START] = rx;
-            }
+        //     // Only store bytes that belong to this Pico
+        //     if (byte_count >= MY_START && byte_count < MY_END) {
+        //         next_frame_buffer[byte_count - MY_START] = rx;
+        //     }
 
-            byte_count++;
+        //     byte_count++;
 
-            // After 36 bytes, reset for next frame
-            if (byte_count >= TOTAL_MOTORS) {
-                byte_count = 0;
-                break; // Exit after completing one frame
-            }
-        }
+        //     // After 36 bytes, reset for next frame
+        //     if (byte_count >= TOTAL_MOTORS) {
+        //         byte_count = 0;
+        //         break; // Exit after completing one frame
+        //     }
+        // }
 
-        // Frame stall: if mid-frame and no byte for 5ms, realign
-        if (byte_count > 0 &&
-            absolute_time_diff_us(last_spi_byte_time, get_absolute_time()) > FRAME_TIMEOUT_US) {
-            byte_count = 0;
-        }
+        // // Frame stall: if mid-frame and no byte for 5ms, realign
+        // if (byte_count > 0 &&
+        //     absolute_time_diff_us(last_spi_byte_time, get_absolute_time()) > FRAME_TIMEOUT_US) {
+        //     byte_count = 0;
+        // }
 
         // --- B. APPLY ON SYNC ---
         if (sync_pulse_detected) {
@@ -202,17 +237,44 @@ int main() {
             
             // CRITICAL: Hard realign the frame tracker. This guarantees that even 
             // if a byte was corrupted or dropped, the next frame starts at 0.
-            byte_count = 0;
+            // byte_count = 0;
             
-            // ATOMIC COPY: Snapshot the incoming buffer
+            // // ATOMIC COPY: Snapshot the incoming buffer
+            // for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+            //     active_frame_buffer[i] = next_frame_buffer[i];
+            // }
+            
+            // // Now apply from the stable snapshot
+            // for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+            //     uint8_t raw_val = active_frame_buffer[i];
+                
+            //     uint16_t target_pwm;
+            //     if (raw_val == 0) {
+            //         target_pwm = 1000;
+            //     } else {
+            //         target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
+            //     }
+            //     if (target_pwm > 2000) target_pwm = 2000;
+            //     set_motor_pwm_us(i, target_pwm);
+            // }
+            
+            // 1) Take a snapshot of "my" 9 bytes from the last DMA frame
+            // Frame layout on the wire: 36 bytes [0..35]
+            // This Pico owns bytes [MY_START .. MY_END-1]
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                active_frame_buffer[i] = next_frame_buffer[i];
+                uint idx = MY_START + i;  // idx in 0..35
+                active_frame_buffer[i] = spi_frame_buffer[idx];
             }
-            
-            // Now apply from the stable snapshot
+
+            // 2) Immediately re-arm DMA for the *next* 36-byte frame
+            dma_channel_set_read_addr(spi_rx_dma_chan, &spi_get_hw(SPI_INST)->dr, false);
+            dma_channel_set_write_addr(spi_rx_dma_chan, spi_frame_buffer, false);
+            dma_channel_set_trans_count(spi_rx_dma_chan, FRAME_BYTES, true);
+
+            // 3) Apply PWM from the stable snapshot (same as before)
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
                 uint8_t raw_val = active_frame_buffer[i];
-                
+
                 uint16_t target_pwm;
                 if (raw_val == 0) {
                     target_pwm = 1000;
