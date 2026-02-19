@@ -258,6 +258,11 @@ int main() {
             //     set_motor_pwm_us(i, target_pwm);
             // }
             
+            // Make sure the DMA has finished capturing the 36-byte frame
+            while (dma_channel_is_busy(spi_rx_dma_chan)) {
+                tight_loop_contents();  // short busy-wait; OK at 400 Hz
+            }
+
             // 1) Take a snapshot of "my" 9 bytes from the last DMA frame
             // Frame layout on the wire: 36 bytes [0..35]
             // This Pico owns bytes [MY_START .. MY_END-1]
