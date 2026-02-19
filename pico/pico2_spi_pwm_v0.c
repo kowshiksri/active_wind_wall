@@ -246,7 +246,7 @@ int main() {
         // --- A. SPI RECEIVE: Fixed 36-byte frame, no start/end bytes ---
         if (spi_is_readable(SPI_INST)) {
             uint8_t rx;
-            spi_read_blocking(SPI_INST, 0, &rx, 36);
+            spi_read_blocking(SPI_INST, 0, &rx, 1);
             last_spi_byte_time = get_absolute_time();
 
             // Only store bytes that belong to this Pico
