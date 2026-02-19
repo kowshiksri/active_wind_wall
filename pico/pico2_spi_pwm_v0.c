@@ -167,11 +167,12 @@ int main() {
 
     while (true) {
 
-        // --- A. SPI RECEIVE: Drain FIFO as fast as possible ---
+        // --- A. SPI RECEIVE: Drain FIFO natively without touching TX ---
         // Read ALL available bytes in one shot to prevent FIFO overflow
         while (spi_is_readable(SPI_INST)) {
-            uint8_t rx;
-            spi_read_blocking(SPI_INST, 0, &rx, 1);
+            // Directly pop the hardware data register. This avoids spi_read_blocking
+            // trying to push dummy bytes into the TX FIFO and deadlocking the slave.
+            uint8_t rx = (uint8_t)spi_get_hw(SPI_INST)->dr;
             last_spi_byte_time = get_absolute_time();
 
             // Only store bytes that belong to this Pico
@@ -198,6 +199,10 @@ int main() {
         if (sync_pulse_detected) {
             sync_pulse_detected = false;
             last_sync_time = get_absolute_time();
+            
+            // CRITICAL: Hard realign the frame tracker. This guarantees that even 
+            // if a byte was corrupted or dropped, the next frame starts at 0.
+            byte_count = 0;
             
             // ATOMIC COPY: Snapshot the incoming buffer
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {

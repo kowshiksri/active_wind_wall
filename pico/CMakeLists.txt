@@ -51,7 +51,7 @@ target_link_libraries(pico2_spi_pwm_v0
         hardware_pwm)
 
 # Add the standard include files to the build
-target_include_directories(pico2_spi_pwm_v0 PRIVATE
+target_include_directories(  PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
 )
 
