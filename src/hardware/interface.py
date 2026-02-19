@@ -45,9 +45,14 @@ class RealSPI:
         self.spi.bits_per_word = 8
         print("[SPI] Initialized SPI0 (GPIO10=MOSI, GPIO11=SCLK)")
     
-    def write_bytes(self, data: List[int]) -> None:
-        self.spi.writebytes(data)
+    # def write_bytes(self, data: List[int]) -> None:
+    #     self.spi.writebytes(data)
     
+    def write_bytes(self, data: List[int]) -> None:
+    # Send one byte per SPI transaction -> CS toggles for each byte
+        for b in data:
+            self.spi.xfer2([int(b) & 0xFF])
+
     def close(self) -> None:
         self.spi.close()
 
@@ -165,21 +170,21 @@ class HardwareInterface:
         # packet.append(PACKET_END)
 
         # 2. Send Stream (No CS toggling needed)
-        # try:
-        #     self.spi.write_bytes(packet)
-        # except Exception as e:
-        #     print(f"[HW] SPI Write Error: {e}")
         try:
             self.spi.write_bytes(packet)
-            
-            # CRITICAL FIX: Wait for the 36 bytes to physically leave the Pi 5
-            # 36 bytes @ 1MHz = ~288us. We wait 350us to be completely safe.
-            t_end = time.perf_counter() + 0.00035
-            while time.perf_counter() < t_end:
-                pass
-                
         except Exception as e:
             print(f"[HW] SPI Write Error: {e}")
+        # try:
+        #     self.spi.write_bytes(packet)
+            
+        #     # CRITICAL FIX: Wait for the 36 bytes to physically leave the Pi 5
+        #     # 36 bytes @ 1MHz = ~288us. We wait 350us to be completely safe.
+        #     t_end = time.perf_counter() + 0.00035
+        #     while time.perf_counter() < t_end:
+        #         pass
+                
+        # except Exception as e:
+        #     print(f"[HW] SPI Write Error: {e}")
         # 3. Trigger Sync (Latches data on all Picos at once)
         try:
             self.gpio.toggle_sync_pin()
