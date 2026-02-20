@@ -9,9 +9,6 @@ from typing import List, Optional, Dict
 import numpy as np
 from config import MOTOR_TO_PICO_LOOKUP, PICO_MOTOR_MAP, PWM_MIN, PWM_MAX
 
-PACKET_START = 0xAA
-PACKET_END = 0x55
-
 class MockSPI:
     """Mock SPI interface for macOS development."""
     def __init__(self):
@@ -45,9 +42,6 @@ class RealSPI:
         self.spi.bits_per_word = 8
         print("[SPI] Initialized SPI0 (GPIO10=MOSI, GPIO11=SCLK)")
     
-    # def write_bytes(self, data: List[int]) -> None:
-    #     self.spi.writebytes(data)
-    
     def write_bytes(self, data: List[int]) -> None:
     # Send one byte per SPI transaction -> CS toggles for each byte
         for b in data:
@@ -69,7 +63,7 @@ class RealGPIO:
         self.sync_pin = sync_pin
         self.gpio_chip = '/dev/gpiochip4'  # Pi 5 uses gpiochip4
         
-        # FIX: We ONLY request the Sync Pin. We DO NOT request CS pins (GPIO 8/7/etc).
+        # ONLY request the Sync Pin. DO NOT request CS pins (GPIO 8/7/etc).
         # This prevents the "Device or resource busy" error.
         config = {
             sync_pin: gpiod.LineSettings(direction=Direction.OUTPUT)
@@ -150,41 +144,13 @@ class HardwareInterface:
                 byte_val = 1 + int((clipped - 1200) * 254 / 800)
                 byte_val = max(1, min(255, byte_val))
             packet.append(byte_val)
-        # # 1. Build the Broadcast Packet
-        # packet = [PACKET_START, 0x00]
-        
-        # # Flatten all 36 motors into the packet sequentially
-        # # Assuming pwm_values is indexed 0..35
-        # for pwm in pwm_values:
-        # #     val = int(max(PWM_MIN, min(PWM_MAX, pwm)))
-        # #     packet.append((val >> 8) & 0xFF) # High Byte
-        # #     packet.append(val & 0xFF)        # Low Byte
-        #     # 1. Clip the value to your range
-        #     pwm_val = max(1200, min(2000, pwm))
-        #     # 2. Map 1200-2000 -> 0-255
-        #     byte_val = int((pwm_val - 1200) * 255 / 800)
 
-        #     # 3. Add to packet
-        #     packet.append(byte_val)
-        
-        # packet.append(PACKET_END)
-
-        # 2. Send Stream (No CS toggling needed)
+        # 2. Send Stream
         try:
             self.spi.write_bytes(packet)
         except Exception as e:
             print(f"[HW] SPI Write Error: {e}")
-        # try:
-        #     self.spi.write_bytes(packet)
-            
-        #     # CRITICAL FIX: Wait for the 36 bytes to physically leave the Pi 5
-        #     # 36 bytes @ 1MHz = ~288us. We wait 350us to be completely safe.
-        #     t_end = time.perf_counter() + 0.00035
-        #     while time.perf_counter() < t_end:
-        #         pass
-                
-        # except Exception as e:
-        #     print(f"[HW] SPI Write Error: {e}")
+        
         # 3. Trigger Sync (Latches data on all Picos at once)
         try:
             self.gpio.toggle_sync_pin()

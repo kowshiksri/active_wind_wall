@@ -4,5 +4,3 @@
 *.pyc
 .venv/
 .env
-pico/build/
-pico_test/build/
