@@ -1,13 +1,12 @@
 """
-Hardware Abstraction Layer for cross-platform compatibility.
-Updated for Shared SPI (Broadcast Mode) - No Chip Selects.
+Hardware Abstraction Layer for SPI motor control.
+Supports both real Raspberry Pi hardware and mock drivers for development.
 """
 
 import platform
 import time
-from typing import List, Optional, Dict
+from typing import List, Optional
 import numpy as np
-from config import MOTOR_TO_PICO_LOOKUP, PICO_MOTOR_MAP, PWM_MIN, PWM_MAX
 
 # Physical motor-to-byte mapping based on actual wiring configuration
 # This maps motor IDs (0-35) to byte positions (0-35) in the SPI packet
@@ -30,40 +29,44 @@ PHYSICAL_MOTOR_ORDER = [
 ]
 
 class MockSPI:
-    """Mock SPI interface for macOS development."""
+    """Mock SPI for development/testing on non-Pi systems."""
+    
     def __init__(self):
         self.frame_count = 0
     
     def write_bytes(self, data: List[int]) -> None:
+        """Simulate SPI write operation."""
         self.frame_count += 1
     
     def close(self) -> None:
         pass
 
 class MockGPIO:
-    """Mock GPIO interface for macOS development."""
+    """Mock GPIO for development/testing on non-Pi systems."""
+    
     def __init__(self):
         self.frame_count = 0
     
     def toggle_sync_pin(self) -> None:
+        """Simulate GPIO sync pulse."""
         self.frame_count += 1
         if self.frame_count % 100 == 0:
-            print(f"[GPIO] Sync Pin Toggled (frame {self.frame_count})")
+            print(f"[GPIO] Sync pulse {self.frame_count}")
 
 class RealSPI:
-    """Real SPI interface for Raspberry Pi using SPI0."""
+    """Hardware SPI driver for Raspberry Pi (SPI0)."""
+    
     def __init__(self):
         import spidev # type: ignore
         self.spi = spidev.SpiDev()
-        # Open SPI0.0. Note: This CLAIMS GPIO 8 (CE0) automatically!
-        self.spi.open(0, 0)
+        self.spi.open(0, 0)  # SPI0, CE0
         self.spi.max_speed_hz = 1000000  # 1 MHz
         self.spi.mode = 0
         self.spi.bits_per_word = 8
         print("[SPI] Initialized SPI0 (GPIO10=MOSI, GPIO11=SCLK)")
     
     def write_bytes(self, data: List[int]) -> None:
-    # Send one byte per SPI transaction -> CS toggles for each byte
+        """Send bytes via SPI. Each byte triggers CS toggle for Pico sync."""
         for b in data:
             self.spi.xfer2([int(b) & 0xFF])
 
@@ -71,7 +74,8 @@ class RealSPI:
         self.spi.close()
 
 class RealGPIO:
-    """Real GPIO interface using gpiod. ONLY handles the Sync Pin."""
+    """Hardware GPIO driver using gpiod (Raspberry Pi 5)."""
+    
     def __init__(self, sync_pin: int = 22):
         import gpiod # type: ignore
         from gpiod.line import Direction, Value # type: ignore
@@ -83,8 +87,7 @@ class RealGPIO:
         self.sync_pin = sync_pin
         self.gpio_chip = '/dev/gpiochip4'  # Pi 5 uses gpiochip4
         
-        # ONLY request the Sync Pin. DO NOT request CS pins (GPIO 8/7/etc).
-        # This prevents the "Device or resource busy" error.
+        # Configure sync pin as output (CS pins handled by SPI driver)
         config = {
             sync_pin: gpiod.LineSettings(direction=Direction.OUTPUT)
         }
@@ -95,54 +98,57 @@ class RealGPIO:
                 consumer="wind-wall-control",
                 config=config
             )
-            # Initialize sync pin to LOW
             self.line_request.set_value(self.sync_pin, Value.INACTIVE)
-            print(f"[GPIO] Using gpiod (Pi 5) - Sync pin initialized on GPIO {self.sync_pin}")
+            print(f"[GPIO] Initialized GPIO {self.sync_pin} (sync pulse)")
             
         except OSError as e:
-            print(f"[GPIO] CRITICAL ERROR: Could not claim GPIO {sync_pin}. {e}")
+            print(f"[GPIO] ERROR: Could not claim GPIO {sync_pin}: {e}")
             raise e
     
     def toggle_sync_pin(self) -> None:
-        """Toggle the GPIO sync pin with a 10µs pulse."""
+        """Send 10µs sync pulse to trigger PWM latch on all Picos."""
         self.line_request.set_value(self.sync_pin, self.Value.ACTIVE)
         self.time.sleep(0.00001)  # 10 microsecond pulse
         self.line_request.set_value(self.sync_pin, self.Value.INACTIVE)
 
 class HardwareInterface:
     """
-    Hardware abstraction layer for Wind Wall.
-    Architecture: Shared SPI Broadcast (No CS) + Shared Sync Trigger.
+    Main hardware abstraction layer.
+    
+    Architecture:
+    - SPI broadcast: sends 36-byte frame to all Picos simultaneously
+    - Sync pulse: triggers atomic PWM update on all Picos
+    - Physical motor remapping: handles wiring configuration
     """
     
     def __init__(self, use_mock: Optional[bool] = None):
         self.platform = platform.system()
         
+        # Auto-detect mock mode on macOS, or use explicit setting
         if use_mock is None:
             self.use_mock = self.platform == "Darwin"
         else:
             self.use_mock = use_mock
             
-        self.motor_to_pico_lookup = MOTOR_TO_PICO_LOOKUP
         self.frames_sent = 0
         
         self._init_drivers()
-        print(f"[HW] Interface Ready. Mode: {'MOCK' if self.use_mock else 'REAL'}")
+        print(f"[HW] Ready. Mode: {'MOCK' if self.use_mock else 'REAL'}")
 
     def _init_drivers(self) -> None:
-        """Initialize SPI and GPIO drivers."""
+        """Initialize SPI and GPIO drivers based on platform."""
         if self.use_mock:
-            print(f"[HW] Running on {self.platform} with MOCK drivers")
+            print(f"[HW] Using mock drivers ({self.platform})")
             self.spi = MockSPI()
             self.gpio = MockGPIO()
         else:
-            print(f"[HW] Running on {self.platform} with REAL drivers")
+            print(f"[HW] Initializing hardware drivers...")
             try:
                 self.spi = RealSPI()
-                # FIX: Do not pass CS pins here.
                 self.gpio = RealGPIO(sync_pin=22)
             except Exception as e:
-                print(f"[HW] Failed to init real drivers: {e}, falling back to mock")
+                print(f"[HW] Hardware init failed: {e}")
+                print(f"[HW] Falling back to mock drivers")
                 self.use_mock = True
                 self.spi = MockSPI()
                 self.gpio = MockGPIO()
@@ -192,8 +198,9 @@ class HardwareInterface:
             print(f"[HW] Frame {self.frames_sent}: Broadcast sent, sync triggered")
 
     def close(self) -> None:
+        """Cleanup hardware resources."""
         try:
             self.spi.close()
-            print("[HW] SPI interface closed")
+            print("[HW] SPI closed")
         except:
             pass
