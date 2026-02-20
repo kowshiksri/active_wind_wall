@@ -541,16 +541,38 @@ class WindWallGUI(QMainWindow):
             bg_color, _ = group.get_color()
             self.selected_group_label.setStyleSheet(f"font-weight: bold; color: {bg_color};")
             
-            # Load group's signal configuration
-            self.signal_type.setCurrentText(group.signal_type)
-            self.amp_min.setValue(group.amp_min)
-            self.amp_max.setValue(group.amp_max)
-            self.dc_value_spinbox.setValue(group.dc_value)
-            self.period.setValue(group.period)
-            self.phase_offset_for_standard.setValue(group.phase_offset)
-            self.phase_offset_spinbox.setValue(group.phase_offset)
-            self.fourier_terms.setValue(group.fourier_terms)
-            self.load_custom_harmonics(group)
+            # Block signals while loading group parameters to prevent on_param_changed
+            # from being triggered with partially-updated spinbox values
+            self.signal_type.blockSignals(True)
+            self.amp_min.blockSignals(True)
+            self.amp_max.blockSignals(True)
+            self.dc_value_spinbox.blockSignals(True)
+            self.period.blockSignals(True)
+            self.phase_offset_for_standard.blockSignals(True)
+            self.phase_offset_spinbox.blockSignals(True)
+            self.fourier_terms.blockSignals(True)
+            
+            try:
+                # Load group's signal configuration
+                self.signal_type.setCurrentText(group.signal_type)
+                self.amp_min.setValue(group.amp_min)
+                self.amp_max.setValue(group.amp_max)
+                self.dc_value_spinbox.setValue(group.dc_value)
+                self.period.setValue(group.period)
+                self.phase_offset_for_standard.setValue(group.phase_offset)
+                self.phase_offset_spinbox.setValue(group.phase_offset)
+                self.fourier_terms.setValue(group.fourier_terms)
+                self.load_custom_harmonics(group)
+            finally:
+                # Always unblock signals, even if an exception occurs
+                self.signal_type.blockSignals(False)
+                self.amp_min.blockSignals(False)
+                self.amp_max.blockSignals(False)
+                self.dc_value_spinbox.blockSignals(False)
+                self.period.blockSignals(False)
+                self.phase_offset_for_standard.blockSignals(False)
+                self.phase_offset_spinbox.blockSignals(False)
+                self.fourier_terms.blockSignals(False)
     
     def on_signal_type_changed(self, signal_type):
         """Handle signal type change - show/hide controls dynamically."""
