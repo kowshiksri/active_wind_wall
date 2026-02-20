@@ -9,6 +9,26 @@ from typing import List, Optional, Dict
 import numpy as np
 from config import MOTOR_TO_PICO_LOOKUP, PICO_MOTOR_MAP, PWM_MIN, PWM_MAX
 
+# Physical motor-to-byte mapping based on actual wiring configuration
+# This maps motor IDs (0-35) to byte positions (0-35) in the SPI packet
+# Byte positions 0-8   → Pico 0 reads these
+# Byte positions 9-17  → Pico 1 reads these
+# Byte positions 18-26 → Pico 2 reads these
+# Byte positions 27-35 → Pico 3 reads these
+PHYSICAL_MOTOR_ORDER = [
+    # Pico 0 (byte positions 0-8): motors in physical order
+    0, 1, 2, 6, 7, 8, 12, 13, 14,
+    
+    # Pico 1 (byte positions 9-17): motors in physical order
+    18, 19, 20, 24, 25, 26, 30, 31, 32,
+    
+    # Pico 2 (byte positions 18-26): motors in physical order
+    3, 4, 5, 9, 10, 11, 15, 16, 17,
+    
+    # Pico 3 (byte positions 27-35): motors in physical order
+    21, 22, 23, 27, 28, 29, 33, 34, 35
+]
+
 class MockSPI:
     """Mock SPI interface for macOS development."""
     def __init__(self):
@@ -130,13 +150,24 @@ class HardwareInterface:
     def send_pwm(self, pwm_values: np.ndarray) -> None:
         """
         Send PWM values to ALL Picos in one Broadcast Frame.
-        Packet: [0xAA, M0_H, M0_L, ... M35_H, M35_L, 0x55]
+        
+        The input pwm_values array is in logical motor order (0-35).
+        We remap it to physical wiring order before sending.
+        
+        Packet structure: 36 bytes, one per motor in physical order
+        - Bytes 0-8   → Pico 0 (motors 0,1,2,6,7,8,12,13,14)
+        - Bytes 9-17  → Pico 1 (motors 18,19,20,24,25,26,30,31,32)
+        - Bytes 18-26 → Pico 2 (motors 3,4,5,9,10,11,15,16,17)
+        - Bytes 27-35 → Pico 3 (motors 21,22,23,27,28,29,33,34,35)
         """
         self.frames_sent += 1
         
-
+        # 1. Reorder motors to match physical wiring configuration
+        reordered_pwm = np.array([pwm_values[i] for i in PHYSICAL_MOTOR_ORDER])
+        
+        # 2. Convert PWM values (1000-2000 us) to byte values (0-255)
         packet = []
-        for pwm in pwm_values:
+        for pwm in reordered_pwm:
             if pwm < 1200:
                 byte_val = 0x00
             else:
@@ -145,13 +176,13 @@ class HardwareInterface:
                 byte_val = max(1, min(255, byte_val))
             packet.append(byte_val)
 
-        # 2. Send Stream
+        # 3. Send via SPI
         try:
             self.spi.write_bytes(packet)
         except Exception as e:
             print(f"[HW] SPI Write Error: {e}")
         
-        # 3. Trigger Sync (Latches data on all Picos at once)
+        # 4. Trigger Sync (latches data on all Picos at once)
         try:
             self.gpio.toggle_sync_pin()
         except Exception as e:
