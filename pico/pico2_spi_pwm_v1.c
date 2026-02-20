@@ -8,7 +8,7 @@
 // CONFIG
 // ==========================================
 // Change this for each board: 0, 1, 2, 3
-#define PICO_ID 0
+#define PICO_ID 1
 
 #define MOTORS_PER_PICO 9
 static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0,1,2,3,4,5,6,7,8};
