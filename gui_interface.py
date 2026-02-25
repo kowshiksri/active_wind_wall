@@ -147,7 +147,7 @@ class WindWallGUI(QMainWindow):
     
     def init_ui(self):
         """Initialize the user interface."""
-        self.setWindowTitle("Active Wind Wall Control Interface - Enhanced")
+        self.setWindowTitle("Active Wind Wall Control Interface")
         self.setGeometry(50, 50, 1400, 900)
         
         # Central widget with splitter
