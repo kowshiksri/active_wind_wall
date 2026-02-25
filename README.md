@@ -238,13 +238,11 @@ No code changes needed—same control loop runs everywhere.
 - Pre-compiled `.uf2` files are ready to flash
 - Build new firmware with: `python pico/build_all_firmware.py`
 
-**Motor Mapping:**
-- Motors 0–8: Top-left quadrant → Pico 0
-- Motors 9–17: Top-right quadrant → Pico 1
-- Motors 18–26: Bottom-left quadrant → Pico 2
-- Motors 27–35: Bottom-right quadrant → Pico 3
-
-Modify `config/__init__.py` to change motor assignments if your wiring is different.
+**Motor Assignment:**
+- Motor-to-Pico assignments are fully configurable in `config/__init__.py`
+- Default configuration uses the `PICO_MOTOR_MAP` dictionary to define which motors connect to each Pico
+- Modify this mapping to match your physical wiring (e.g., if your motors are in a different order or different quadrants)
+- See the `PHYSICAL_MOTOR_ORDER` constant for details on byte-level communication with Picos
 
 ## Technical Details
 
