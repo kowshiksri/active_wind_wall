@@ -79,9 +79,11 @@ cd active_wind_wall
 python3 -m venv venv
 source venv/bin/activate
 
-# Install dependencies
+# Install dependencies (Pi-specific packages are commented out by default)
 pip install -r requirements.txt
 ```
+
+**Note:** `requirements.txt` is configured for development (macOS/Linux). Pi-specific packages (`spidev`, `gpiozero`) are commented out to avoid install failures on non-Pi systems. See the Raspberry Pi section below to enable them for deployment.
 
 ### Running the GUI (Recommended for Interactive Control)
 
@@ -118,7 +120,12 @@ sudo apt install python3-pip python3-venv python3-dev
 python3 -m venv venv
 source venv/bin/activate
 
-# Install Python dependencies
+# Enable Pi-specific dependencies
+# Edit requirements.txt and uncomment the spidev and gpiozero lines
+# Or manually install them:
+pip install spidev>=3.5 gpiozero>=2.0.0
+
+# Install remaining dependencies
 pip install -r requirements.txt
 
 # Flash Pico firmware (if needed)
