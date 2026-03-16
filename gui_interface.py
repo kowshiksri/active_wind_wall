@@ -493,6 +493,7 @@ class WindWallGUI(QMainWindow):
         self.plot_widget.setLabel('left', 'PWM Value', units='μs')
         self.plot_widget.setLabel('bottom', 'Time', units='s')
         self.plot_widget.setYRange(900, 2100)
+        self.plot_widget.disableAutoRange()
         self.plot_widget.showGrid(x=True, y=True, alpha=0.3)
         self.plot_curve = self.plot_widget.plot(pen=pg.mkPen(color='b', width=2))
         layout.addWidget(self.plot_widget)

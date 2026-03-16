@@ -10,7 +10,7 @@ from datetime import datetime
 import numpy as np
 from multiprocessing import Event
 from config import (
-    NUM_MOTORS, UPDATE_RATE_HZ, PWM_MIN, PWM_MAX, PWM_CENTER,
+    NUM_MOTORS, UPDATE_RATE_HZ, PWM_MIN, PWM_MIN_RUNNING, PWM_MAX, PWM_CENTER,
     MAX_PWM_SLEW_LIMIT, LOOP_TIME_MS, BASE_FREQUENCY,
     SIGNAL_MIN_DEFAULT, SIGNAL_MAX_DEFAULT
 )
@@ -99,8 +99,13 @@ def flight_loop(
         else:
             print("[FlightLoop] Logging disabled")
         
-        # State tracking
-        previous_pwm = np.full(NUM_MOTORS, PWM_CENTER, dtype=np.float64)
+        # State tracking — seed from signal at t=0 so there is no forced ramp from PWM_CENTER
+        _init_signal = signal_gen.get_flow_field(0.0)
+        previous_pwm = np.where(
+            _init_signal <= 0.0,
+            float(PWM_MIN),
+            PWM_MIN_RUNNING + _init_signal * (PWM_MAX - PWM_MIN_RUNNING)
+        )
         active_slew_limit = (slew_limit_override if slew_limit_override is not None else MAX_PWM_SLEW_LIMIT) * LOOP_TIME_MS
         frame_count = 0
         loop_start_time = time.perf_counter()
@@ -114,8 +119,14 @@ def flight_loop(
             # --- Step 1: Generate physics signal (0.0 to 1.0) ---
             signal_raw = signal_gen.get_flow_field(frame_time)
             
-            # --- Step 2: Map signal to PWM range (1000-2000) ---
-            pwm_target = PWM_MIN + signal_raw * (PWM_MAX - PWM_MIN)
+            # --- Step 2: Map signal to PWM range ---
+            # signal == 0.0  →  PWM_MIN (1000 µs, arm/stopped)
+            # signal  > 0.0  →  linear from PWM_MIN_RUNNING (1200 µs) to PWM_MAX (2000 µs)
+            pwm_target = np.where(
+                signal_raw <= 0.0,
+                float(PWM_MIN),
+                PWM_MIN_RUNNING + signal_raw * (PWM_MAX - PWM_MIN_RUNNING)
+            )
             
             # --- Step 3: Apply safety constraints ---
             # Calculate delta from previous PWM

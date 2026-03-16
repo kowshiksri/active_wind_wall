@@ -8,7 +8,8 @@ UPDATE_RATE_HZ: int = 400
 LOOP_TIME_MS: float = 1000.0 / UPDATE_RATE_HZ  # 2.5 ms
 
 # PWM Signal Configuration
-PWM_MIN: int = 1000  # Minimum PWM pulse width in microseconds
+PWM_MIN: int = 1000  # Minimum PWM pulse width in microseconds (arming / stopped)
+PWM_MIN_RUNNING: int = 1200  # Minimum PWM for motor to actually spin (provisional — characterise per motor)
 PWM_MAX: int = 2000  # Maximum PWM pulse width in microseconds
 PWM_CENTER: int = (PWM_MIN + PWM_MAX) // 2  # 1500 µs neutral point
 
