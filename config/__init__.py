@@ -13,7 +13,7 @@ PWM_MAX: int = 2000  # Maximum PWM pulse width in microseconds
 PWM_CENTER: int = (PWM_MIN + PWM_MAX) // 2  # 1500 µs neutral point
 
 # Safety Parameters
-SLEW_LIMIT: int = 50  # Maximum PWM change per loop tick (units/tick)
+MAX_PWM_SLEW_LIMIT: int = 25.0  # µs/ms — absolute, independent of loop rate
 
 # Signal Synthesis
 FOURIER_TERMS: int = 7  # Number of Fourier coefficients per motor

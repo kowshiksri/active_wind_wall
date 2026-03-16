@@ -872,9 +872,9 @@ class WindWallGUI(QMainWindow):
             from config import BASE_FREQUENCY
 
             # If any group uses Square Wave, loosen slew limit to avoid edge smoothing
-            from config import PWM_MAX, PWM_MIN, SLEW_LIMIT
+            from config import MAX_PWM_SLEW_LIMIT
             square_wave_present = any(g.signal_type == "Square Wave" and len(g.motors) > 0 for g in self.groups)
-            slew_limit_override = (PWM_MAX - PWM_MIN) if square_wave_present else SLEW_LIMIT
+            slew_limit_override = float('inf') if square_wave_present else MAX_PWM_SLEW_LIMIT
             
             self.stop_event = multiprocessing.Event()
             self.shared_buffer = MotorStateBuffer(create=True)

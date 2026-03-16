@@ -11,7 +11,7 @@ import numpy as np
 from multiprocessing import Event
 from config import (
     NUM_MOTORS, UPDATE_RATE_HZ, PWM_MIN, PWM_MAX, PWM_CENTER,
-    SLEW_LIMIT, LOOP_TIME_MS, BASE_FREQUENCY,
+    MAX_PWM_SLEW_LIMIT, LOOP_TIME_MS, BASE_FREQUENCY,
     SIGNAL_MIN_DEFAULT, SIGNAL_MAX_DEFAULT
 )
 from src.hardware import HardwareInterface
@@ -101,7 +101,7 @@ def flight_loop(
         
         # State tracking
         previous_pwm = np.full(NUM_MOTORS, PWM_CENTER, dtype=np.float64)
-        active_slew_limit = slew_limit_override if slew_limit_override is not None else SLEW_LIMIT
+        active_slew_limit = (slew_limit_override if slew_limit_override is not None else MAX_PWM_SLEW_LIMIT) * LOOP_TIME_MS
         frame_count = 0
         loop_start_time = time.perf_counter()
         
