@@ -15,7 +15,7 @@ from config import (
     SIGNAL_MIN_DEFAULT, SIGNAL_MAX_DEFAULT
 )
 from src.hardware import HardwareInterface
-from src.physics import SignalGenerator
+from src.physics import SignalGenerator, DirectSignalGenerator
 from src.core import MotorStateBuffer
 
 
@@ -32,6 +32,8 @@ def flight_loop(
     enable_logging: bool = True,
     log_interval_frames: int = 40,
     slew_limit_override: float | None = None,
+    signal_table: np.ndarray | None = None,
+    signal_sample_rate_hz: float | None = None,
 ) -> None: # type: ignore
     """
     Main flight control loop running at 400 Hz.
@@ -62,18 +64,32 @@ def flight_loop(
         # Initialize hardware interface with platform detection
         hardware = HardwareInterface(use_mock=use_mock_hardware)
         
-        # Initialize physics engine with coefficient matrix and timing/phase options
-        if fourier_coeffs is None:
-            raise ValueError("fourier_coeffs must be provided to flight_loop")
-        signal_gen = SignalGenerator(
-            fourier_coeffs,
-            base_freq=base_freq if base_freq is not None else BASE_FREQUENCY,
-            omega_per_motor=omega_per_motor,
-            phase_radians=phase_radians,
-            start_time_offset=start_time_offset,
-            value_min=value_min if value_min is not None else SIGNAL_MIN_DEFAULT,
-            value_max=value_max if value_max is not None else SIGNAL_MAX_DEFAULT,
-        )
+        # Initialize signal generator — Fourier synthesis or direct table playback
+        _vmin = value_min if value_min is not None else SIGNAL_MIN_DEFAULT
+        _vmax = value_max if value_max is not None else SIGNAL_MAX_DEFAULT
+        if signal_table is not None:
+            signal_gen = DirectSignalGenerator(
+                signal_table,
+                sample_rate_hz=signal_sample_rate_hz if signal_sample_rate_hz is not None else UPDATE_RATE_HZ,
+                value_min=_vmin,
+                value_max=_vmax,
+            )
+            print(f"[FlightLoop] Mode: Direct signal table "
+                  f"({signal_gen.n_frames} frames @ {signal_gen.sample_rate_hz:.0f} Hz "
+                  f"= {signal_gen.n_frames / signal_gen.sample_rate_hz:.2f} s)")
+        elif fourier_coeffs is not None:
+            signal_gen = SignalGenerator(
+                fourier_coeffs,
+                base_freq=base_freq if base_freq is not None else BASE_FREQUENCY,
+                omega_per_motor=omega_per_motor,
+                phase_radians=phase_radians,
+                start_time_offset=start_time_offset,
+                value_min=_vmin,
+                value_max=_vmax,
+            )
+            print(f"[FlightLoop] Mode: Fourier synthesis")
+        else:
+            raise ValueError("Provide either fourier_coeffs or signal_table to flight_loop")
         
         # Attach to shared memory buffer
         shared_buffer = MotorStateBuffer(create=False)

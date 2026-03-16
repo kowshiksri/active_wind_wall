@@ -33,8 +33,9 @@ This is a **wind wall experiment platform** that controls 36 independent motors 
 - **Motor Grid Layout**: 6×6 grid divided into 4 quadrants, one per Pico
 
 **Safety & Reliability:**
-- Slew-rate limiting prevents motors from changing speed too abruptly (max 50 PWM units/tick)
+- Slew-rate limiting prevents motors from changing speed too abruptly (`MAX_PWM_SLEW_LIMIT` µs/ms, absolute — independent of update rate)
 - PWM bounds checking ensures commands stay in valid range (1000–2000 µs)
+- Two-zone PWM mapping: signal = 0 → 1000 µs (arm/stop); signal > 0 → linear 1200–2000 µs (no dead zone)
 - Shared memory buffer for safe IPC between UI and control loop
 - Graceful shutdown on Ctrl+C with proper cleanup
 
@@ -63,7 +64,9 @@ active_wind_wall/
 ├── tests/
 │   ├── plot_log.py                  # Plot logged CSV data
 │   ├── test_packet_capture.py       # Validate hardware communication
-│   └── compare_motors.py            # Compare motor response data
+│   ├── compare_motors.py            # Compare motor response data
+│   ├── test_slew_rate.py            # Verify slew limit is rate-independent
+│   └── test_pwm_mapping.py          # Verify two-zone PWM mapping and startup seeding
 └── logs/                            # Experiment data (CSV format)
 ```
 
@@ -190,26 +193,46 @@ Key settings are in [config/__init__.py](config/__init__.py):
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `NUM_MOTORS` | 36 | Number of motors in the 6×6 grid |
-| `UPDATE_RATE_HZ` | 400 | Control loop frequency (2.5 ms per tick) |
-| `PWM_MIN` / `PWM_MAX` | 1000 / 2000 | PWM pulse width range (microseconds) |
-| `SLEW_LIMIT` | 50 | Max PWM change per update (safety feature) |
+| `UPDATE_RATE_HZ` | 400 | Control loop frequency (configurable; 2.5 ms per tick at 400 Hz) |
+| `PWM_MIN` | 1000 µs | Arm / stopped signal sent to ESC |
+| `PWM_MIN_RUNNING` | 1200 µs | Minimum PWM at which motor actually spins (provisional — characterise per motor) |
+| `PWM_MAX` | 2000 µs | Full-throttle PWM |
+| `MAX_PWM_SLEW_LIMIT` | 25.0 µs/ms | Max PWM rate-of-change in **absolute** terms — does not change when `UPDATE_RATE_HZ` is changed |
 | `FOURIER_TERMS` | 7 | Number of Fourier terms for signal reconstruction |
 | `BASE_FREQUENCY` | 1.0 Hz | Default base frequency for periodic signals |
 
 ## Signal Design
 
-The system is designed to work with any signal generation method. **Current implementation uses Fourier series** to generate smooth, repeatable motor patterns via [src/physics/signal_designer.py](src/physics/signal_designer.py):
+Two signal modes are available, selectable from the **Signal Mode** dropdown at the top of the Signal Configuration panel:
 
-**Test Cases & Current Implementation:**
-- **Square Pulse** - On/off pattern (default, with configurable duty cycle)
-- **Sine Wave** - Smooth oscillation at specified frequency
-- **Uniform** - Constant speed for all motors
-- **Custom Fourier** - Combine multiple harmonics for complex waveforms
+### Mode 1 — Fourier (per group) — default
 
-Each signal is pre-computed as coefficients before the experiment starts, then reconstructed in real-time during each control loop cycle.
+Signals are pre-computed as Fourier coefficient matrices before the experiment starts, then reconstructed sample-by-sample in real-time during each control loop tick. Each motor group can have an independent signal type:
 
-**Future Signal Generation Methods:**
-The system is not restricted to Fourier synthesis. You can implement alternative signal generation methods (e.g., splines, neural networks, experimental data interpolation) by creating new coefficient generators in `src/physics/` and passing them to the control loop. The flight loop only requires a coefficient matrix—the generation method is interchangeable.
+- **Sine Wave** — smooth oscillation at a configurable frequency and amplitude
+- **Square Wave** — on/off pattern synthesised from odd harmonics
+- **Constant DC** — fixed motor speed
+- **Custom Fourier** — add individual harmonics with amplitude and phase
+
+### Mode 2 — Direct (file)
+
+For experiments where the desired per-motor trajectory is known in advance (e.g., from simulation, CFD data, or a pre-computed optimisation), you can bypass Fourier synthesis entirely and feed the control loop a raw signal table.
+
+**File format:** A 2-D array of shape `[n_frames, n_motors]` with values in `[0, 1]`.
+
+```python
+import numpy as np
+
+# Example: 10 seconds at 400 Hz
+table = np.zeros((4000, 36))
+table[:, 0] = 0.5                  # motor 0 at 50% the whole time
+table[1000:3000, 5] = 0.8          # motor 5 at 80% from t=2.5 s to t=7.5 s
+np.save("my_signal.npy", table)
+```
+
+Load the file via **Browse (.npy / .csv)…** in the GUI. The control loop interpolates linearly between frames and holds the last value when the table is exhausted.
+
+**Accepted formats:** `.npy` (NumPy binary, recommended) or `.csv` (comma-delimited, rows = frames, columns = motors).
 
 ## Data Logging & Analysis
 
@@ -267,7 +290,7 @@ For those interested in the implementation:
 |-------|----------|
 | GUI won't launch | Check PyQt6 installation: `pip install --upgrade PyQt6` |
 | Motors don't move | Verify Pico firmware is flashed and motors are powered |
-| Jerky motor movement | Increase `FOURIER_TERMS` for smoother signals or reduce `SLEW_LIMIT` |
+| Jerky motor movement | Increase `FOURIER_TERMS` for smoother signals or reduce `MAX_PWM_SLEW_LIMIT` |
 | High timing jitter | Close other applications; run with `nice -n -20` on Python process |
 | Import errors | Check venv is activated: `source venv/bin/activate` |
 

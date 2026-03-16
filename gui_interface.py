@@ -5,12 +5,13 @@ Features: Multiple groups, live monitoring, custom Fourier signals.
 """
 
 import sys
+from pathlib import Path
 import numpy as np
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QSpinBox, QDoubleSpinBox,
     QGridLayout, QGroupBox, QMessageBox, QListWidget, QSplitter,
-    QTableWidget, QTableWidgetItem, QHeaderView
+    QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
@@ -133,6 +134,9 @@ class WindWallGUI(QMainWindow):
         self.flight_process = None
         self.stop_event = None
         self.shared_buffer = None
+        # Direct signal mode state
+        self.direct_signal_table = None   # np.ndarray [n_frames, n_motors] or None
+        self.direct_signal_rate_hz = None # sample rate of the loaded table
         
         # Live monitoring - oscilloscope style
         self.monitor_data_time = deque(maxlen=200)  # 5 seconds at 40Hz
@@ -210,15 +214,40 @@ class WindWallGUI(QMainWindow):
         config_box = QGroupBox("Signal Configuration")
         config_layout = QVBoxLayout()
         
+        # --- Signal mode toggle ---
+        config_layout.addWidget(QLabel("Signal Mode:"))
+        self.signal_mode = QComboBox()
+        self.signal_mode.addItems(["Fourier (per group)", "Direct (file)"])
+        self.signal_mode.currentTextChanged.connect(self.on_signal_mode_changed)
+        config_layout.addWidget(self.signal_mode)
+
+        # Direct signal file picker (shown only in Direct mode)
+        self.direct_signal_widget = QWidget()
+        direct_layout = QVBoxLayout(self.direct_signal_widget)
+        direct_layout.setContentsMargins(0, 0, 0, 0)
+        self.direct_file_label = QLabel("No file loaded")
+        self.direct_file_label.setStyleSheet("color: #888; font-style: italic;")
+        direct_layout.addWidget(self.direct_file_label)
+        browse_btn = QPushButton("Browse (.npy / .csv)…")
+        browse_btn.clicked.connect(self.load_direct_signal_file)
+        direct_layout.addWidget(browse_btn)
+        config_layout.addWidget(self.direct_signal_widget)
+        self.direct_signal_widget.hide()
+
+        # Fourier per-group controls (shown in Fourier mode)
+        self.fourier_config_widget = QWidget()
+        fourier_cfg_layout = QVBoxLayout(self.fourier_config_widget)
+        fourier_cfg_layout.setContentsMargins(0, 0, 0, 0)
+
         self.selected_group_label = QLabel("Selected: None")
         self.selected_group_label.setStyleSheet("font-weight: bold; color: #2196F3;")
-        config_layout.addWidget(self.selected_group_label)
-        
-        config_layout.addWidget(QLabel("Signal Type:"))
+        fourier_cfg_layout.addWidget(self.selected_group_label)
+
+        fourier_cfg_layout.addWidget(QLabel("Signal Type:"))
         self.signal_type = QComboBox()
         self.signal_type.addItems(["Sine Wave", "Square Wave", "Constant DC", "Custom Fourier"])
         self.signal_type.currentTextChanged.connect(self.on_signal_type_changed)
-        config_layout.addWidget(self.signal_type)
+        fourier_cfg_layout.addWidget(self.signal_type)
         
         # Standard signal parameters
         self.standard_params_widget = QWidget()
@@ -259,7 +288,7 @@ class WindWallGUI(QMainWindow):
         self.fourier_terms.valueChanged.connect(self.on_param_changed)
         standard_layout.addWidget(self.fourier_terms)
         
-        config_layout.addWidget(self.standard_params_widget)
+        fourier_cfg_layout.addWidget(self.standard_params_widget)
         
         # DC Constant value widget (only for Constant DC)
         self.dc_params_widget = QWidget()
@@ -285,13 +314,13 @@ class WindWallGUI(QMainWindow):
         self.phase_offset_spinbox.valueChanged.connect(self.on_param_changed)
         dc_layout.addWidget(self.phase_offset_spinbox)
         
-        config_layout.addWidget(self.dc_params_widget)
+        fourier_cfg_layout.addWidget(self.dc_params_widget)
         self.dc_params_widget.hide()
-        
+
         # Phase offset also for standard signals
         self.phase_offset_label = QLabel("Phase Offset (s):")
         self.phase_offset_label.hide()
-        config_layout.addWidget(self.phase_offset_label)
+        fourier_cfg_layout.addWidget(self.phase_offset_label)
         self.phase_offset_for_standard = QDoubleSpinBox()
         self.phase_offset_for_standard.setRange(-30.0, 30.0)
         self.phase_offset_for_standard.setSingleStep(0.1)
@@ -300,7 +329,7 @@ class WindWallGUI(QMainWindow):
         self.phase_offset_for_standard.setToolTip("Time shift for synchronized on/off groups")
         self.phase_offset_for_standard.valueChanged.connect(self.on_param_changed)
         self.phase_offset_for_standard.hide()
-        config_layout.addWidget(self.phase_offset_for_standard)
+        fourier_cfg_layout.addWidget(self.phase_offset_for_standard)
         
         # Custom Fourier parameters
         self.custom_params_widget = QWidget()
@@ -324,9 +353,12 @@ class WindWallGUI(QMainWindow):
         harmonic_btn_layout.addWidget(remove_harmonic_btn)
         custom_layout.addLayout(harmonic_btn_layout)
         
-        config_layout.addWidget(self.custom_params_widget)
+        fourier_cfg_layout.addWidget(self.custom_params_widget)
         self.custom_params_widget.hide()
-        
+
+        # Add the fourier wrapper to the main config layout
+        config_layout.addWidget(self.fourier_config_widget)
+
         config_box.setLayout(config_layout)
         layout.addWidget(config_box)
         
@@ -575,6 +607,48 @@ class WindWallGUI(QMainWindow):
                 self.phase_offset_spinbox.blockSignals(False)
                 self.fourier_terms.blockSignals(False)
     
+    def on_signal_mode_changed(self, mode):
+        """Toggle between Fourier per-group mode and Direct file mode."""
+        is_direct = mode == "Direct (file)"
+        self.direct_signal_widget.setVisible(is_direct)
+        self.fourier_config_widget.setVisible(not is_direct)
+
+    def load_direct_signal_file(self):
+        """Open a file dialog to load a direct signal table (.npy or .csv)."""
+        from config import UPDATE_RATE_HZ
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Signal File", "",
+            "Signal files (*.npy *.csv);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            if path.endswith(".npy"):
+                table = np.load(path)
+            else:
+                table = np.loadtxt(path, delimiter=",")
+            if table.ndim != 2:
+                raise ValueError(f"Expected 2-D array [frames × motors], got shape {table.shape}")
+            n_frames, n_motors_in_file = table.shape
+            from config import NUM_MOTORS
+            if n_motors_in_file != NUM_MOTORS:
+                QMessageBox.warning(
+                    self, "Shape mismatch",
+                    f"File has {n_motors_in_file} motor columns, expected {NUM_MOTORS}.\n"
+                    "Load anyway? Values will be broadcast or truncated."
+                )
+            self.direct_signal_table = table.astype(np.float64)
+            self.direct_signal_rate_hz = float(UPDATE_RATE_HZ)
+            duration_s = n_frames / UPDATE_RATE_HZ
+            self.direct_file_label.setText(
+                f"{Path(path).name}  ({n_frames} frames, {duration_s:.1f} s)"
+            )
+            self.direct_file_label.setStyleSheet("color: #2e7d32; font-style: normal;")
+        except Exception as e:
+            QMessageBox.critical(self, "Load failed", str(e))
+            self.direct_file_label.setText("Load failed — see error")
+            self.direct_file_label.setStyleSheet("color: #c62828;")
+
     def on_signal_type_changed(self, signal_type):
         """Handle signal type change - show/hide controls dynamically."""
         is_sine = signal_type == "Sine Wave"
@@ -816,19 +890,28 @@ class WindWallGUI(QMainWindow):
     
     def start_experiment(self):
         """Start the experiment."""
-        # Check if any motors are assigned
-        active_count = sum(1 for btn in self.motor_buttons if btn.assigned_group is not None)
-        if active_count == 0:
-            QMessageBox.warning(self, "No Motors Assigned", 
-                              "Please assign at least one motor to a group!")
-            return
-        
+        is_direct = self.signal_mode.currentText() == "Direct (file)"
+
+        if is_direct:
+            if self.direct_signal_table is None:
+                QMessageBox.warning(self, "No Signal File",
+                                    "Please load a signal file (.npy or .csv) first.")
+                return
+            coeffs, omega_per_motor = None, None
+            signal_table = self.direct_signal_table
+            signal_rate = self.direct_signal_rate_hz
+        else:
+            active_count = sum(1 for btn in self.motor_buttons if btn.assigned_group is not None)
+            if active_count == 0:
+                QMessageBox.warning(self, "No Motors Assigned",
+                                    "Please assign at least one motor to a group!")
+                return
+            coeffs, omega_per_motor = self.generate_fourier_coefficients()
+            signal_table, signal_rate = None, None
+
         # Reset experiment timeline for fresh start
         self.experiment_start_time = None
-        
-        # Generate coefficients and per-motor omega
-        coeffs, omega_per_motor = self.generate_fourier_coefficients()
-        
+
         # Update UI
         self.experiment_running = True
         self.start_btn.setEnabled(False)
@@ -843,48 +926,67 @@ class WindWallGUI(QMainWindow):
                 color: #2e7d32;
             }
         """)
-        
+
         # Disable configuration during experiment
         self.groups_list.setEnabled(False)
         self.signal_type.setEnabled(False)
+        self.signal_mode.setEnabled(False)
         for btn in self.motor_buttons:
             btn.setEnabled(False)
-        
+
         # Start live monitoring
         self.start_live_monitor()
-        
+
         # Start experiment in separate thread
         import threading
         experiment_thread = threading.Thread(
             target=self.run_experiment_thread,
-            args=(coeffs, omega_per_motor)
+            args=(coeffs, omega_per_motor, signal_table, signal_rate)
         )
         experiment_thread.daemon = True
         experiment_thread.start()
     
-    def run_experiment_thread(self, coeffs, omega_per_motor):
+    def run_experiment_thread(self, coeffs, omega_per_motor,
+                              signal_table=None, signal_sample_rate_hz=None):
         """Run the experiment (called in separate thread)."""
         try:
             duration = self.duration.value()
-            
+
             import platform
             import time
             from src.core.flight_loop import flight_loop
-            from config import BASE_FREQUENCY
+            from config import BASE_FREQUENCY, MAX_PWM_SLEW_LIMIT
 
-            # If any group uses Square Wave, loosen slew limit to avoid edge smoothing
-            from config import MAX_PWM_SLEW_LIMIT
-            square_wave_present = any(g.signal_type == "Square Wave" and len(g.motors) > 0 for g in self.groups)
+            # Slew limit: unlimited for square waves in Fourier mode; default otherwise
+            square_wave_present = (signal_table is None and
+                any(g.signal_type == "Square Wave" and len(g.motors) > 0 for g in self.groups))
             slew_limit_override = float('inf') if square_wave_present else MAX_PWM_SLEW_LIMIT
-            
+
             self.stop_event = multiprocessing.Event()
             self.shared_buffer = MotorStateBuffer(create=True)
-            
+
             use_mock = platform.system() == "Darwin"
-            
+
+            flight_kwargs = dict(
+                stop_event=self.stop_event,
+                use_mock_hardware=use_mock,
+                enable_logging=True,
+                log_interval_frames=40,
+                slew_limit_override=slew_limit_override,
+            )
+            if signal_table is not None:
+                flight_kwargs['signal_table'] = signal_table
+                flight_kwargs['signal_sample_rate_hz'] = signal_sample_rate_hz
+            else:
+                flight_kwargs['fourier_coeffs'] = coeffs
+                flight_kwargs['base_freq'] = BASE_FREQUENCY
+                flight_kwargs['omega_per_motor'] = omega_per_motor
+                flight_kwargs['value_min'] = 0.0
+                flight_kwargs['value_max'] = 1.0
+
             self.flight_process = multiprocessing.Process(
                 target=flight_loop,
-                args=(self.stop_event, use_mock, coeffs, BASE_FREQUENCY, omega_per_motor, None, 0.0, 0.0, 1.0, True, 40, slew_limit_override),
+                kwargs=flight_kwargs,
                 name="FlightLoop",
                 daemon=False
             )
@@ -1045,6 +1147,7 @@ class WindWallGUI(QMainWindow):
         # Re-enable configuration
         self.groups_list.setEnabled(True)
         self.signal_type.setEnabled(True)
+        self.signal_mode.setEnabled(True)
         for btn in self.motor_buttons:
             btn.setEnabled(True)
         

@@ -87,4 +87,42 @@ class SignalGenerator:
         return np.clip(signal, self.value_min, self.value_max)
 
 
-__all__ = ['SignalGenerator']
+class DirectSignalGenerator:
+    """
+    Plays back a pre-computed signal table instead of Fourier synthesis.
+
+    The table is a 2-D array of shape [n_frames, n_motors] with values in
+    [0, 1].  At runtime, get_flow_field(t) interpolates between rows using
+    the known sample rate.  The signal holds its last value when t exceeds
+    the table duration (no looping).
+
+    Accepted file formats (loaded externally before passing here):
+        np.load("signal.npy")          → shape [n_frames, n_motors]
+        np.loadtxt("signal.csv", ...)  → same shape
+    """
+
+    def __init__(
+        self,
+        signal_table: np.ndarray,
+        sample_rate_hz: float,
+        value_min: float = SIGNAL_MIN_DEFAULT,
+        value_max: float = SIGNAL_MAX_DEFAULT,
+    ):
+        if signal_table.ndim != 2:
+            raise ValueError("signal_table must be 2-D: [n_frames, n_motors]")
+        self.table = np.clip(signal_table.astype(np.float64), value_min, value_max)
+        self.sample_rate_hz = float(sample_rate_hz)
+        self.n_frames, self.n_motors = self.table.shape
+        self.value_min = float(value_min)
+        self.value_max = float(value_max)
+
+    def get_flow_field(self, t: float) -> np.ndarray:
+        idx_float = t * self.sample_rate_hz
+        idx_float = min(max(idx_float, 0.0), self.n_frames - 1)
+        idx_lo = int(idx_float)
+        idx_hi = min(idx_lo + 1, self.n_frames - 1)
+        alpha = idx_float - idx_lo
+        return (1.0 - alpha) * self.table[idx_lo] + alpha * self.table[idx_hi]
+
+
+__all__ = ['SignalGenerator', 'DirectSignalGenerator']
