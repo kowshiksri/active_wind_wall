@@ -54,7 +54,7 @@ SHARED_MEM_SIZE: int = 36 * 8  # 36 motors * PWM values * 8 bytes (float64)
 #   - Test with single Pico (motors map to Pico0, others are ignored)
 
 # Set True to test a single motor on Pico0 (motor 0 only).
-SINGLE_MOTOR_TEST: bool = True
+SINGLE_MOTOR_TEST: bool = False
 
 FULL_PICO_MOTOR_MAP: dict = {
     'quadrant_top_left': {

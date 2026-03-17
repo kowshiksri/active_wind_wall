@@ -11,7 +11,8 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QPushButton, QLabel, QComboBox, QSpinBox, QDoubleSpinBox,
     QGridLayout, QGroupBox, QMessageBox, QListWidget, QSplitter,
-    QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog
+    QTableWidget, QTableWidgetItem, QHeaderView, QFileDialog,
+    QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont, QColor
@@ -62,19 +63,28 @@ class MotorGroup:
 
 class MotorButton(QPushButton):
     """Custom button for motor selection with group support."""
-    
+
     def __init__(self, motor_id, parent_gui):
         super().__init__(str(motor_id))
         self.motor_id = motor_id
         self.parent_gui = parent_gui
         self.assigned_group = None
+        self.is_muted = False
         self.setMinimumSize(60, 60)
         self.setMaximumSize(60, 60)
         self.update_style()
         self.clicked.connect(self.on_click)
-    
+
     def on_click(self):
-        """Handle motor button click - assign to selected group."""
+        """Handle motor button click.
+
+        During experiment: toggle mute for this motor.
+        Outside experiment: assign/unassign to selected group.
+        """
+        if self.parent_gui.experiment_running:
+            self.parent_gui.toggle_motor_mute(self.motor_id)
+            return
+
         selected_group = self.parent_gui.get_selected_group()
         if selected_group:
             if self.assigned_group == selected_group:
@@ -89,10 +99,24 @@ class MotorButton(QPushButton):
                 selected_group.motors.add(self.motor_id)
                 self.assigned_group = selected_group
             self.update_style()
-    
+
     def update_style(self):
-        """Update button appearance based on group assignment."""
-        if self.assigned_group:
+        """Update button appearance based on group assignment and mute state."""
+        if self.is_muted:
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #424242;
+                    color: #888888;
+                    border: 2px dashed #666666;
+                    border-radius: 8px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #555555;
+                }
+            """)
+        elif self.assigned_group:
             bg_color, border_color = self.assigned_group.get_color()
             self.setStyleSheet(f"""
                 QPushButton {{
@@ -131,6 +155,8 @@ class WindWallGUI(QMainWindow):
         self.selected_group_index = -1
         self.motor_buttons = []
         self.experiment_running = False
+        self.is_armed = False
+        self.motor_muted = set()  # Set of motor IDs muted during experiment
         self.flight_process = None
         self.stop_event = None
         self.shared_buffer = None
@@ -437,8 +463,29 @@ class WindWallGUI(QMainWindow):
         layout.addWidget(self.active_count_label)
         
         layout.addStretch()
-        
+
+        self.arm_btn = QPushButton("Arm Motors")
+        self.arm_btn.setMinimumHeight(45)
+        self.arm_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #F57C00; }
+        """)
+        self.arm_btn.clicked.connect(self.toggle_arm)
+        layout.addWidget(self.arm_btn)
+
+        self.auto_disarm_cb = QCheckBox("Auto-disarm after experiment")
+        self.auto_disarm_cb.setChecked(False)
+        layout.addWidget(self.auto_disarm_cb)
+
         self.start_btn = QPushButton("Start Experiment")
+        self.start_btn.setEnabled(False)
         self.start_btn.setMinimumHeight(50)
         self.start_btn.setStyleSheet("""
             QPushButton {
@@ -632,11 +679,14 @@ class WindWallGUI(QMainWindow):
             n_frames, n_motors_in_file = table.shape
             from config import NUM_MOTORS
             if n_motors_in_file != NUM_MOTORS:
-                QMessageBox.warning(
+                reply = QMessageBox.warning(
                     self, "Shape mismatch",
                     f"File has {n_motors_in_file} motor columns, expected {NUM_MOTORS}.\n"
-                    "Load anyway? Values will be broadcast or truncated."
+                    "Load anyway? Values will be broadcast or truncated.",
+                    QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel
                 )
+                if reply != QMessageBox.StandardButton.Ok:
+                    return
             self.direct_signal_table = table.astype(np.float64)
             self.direct_signal_rate_hz = float(UPDATE_RATE_HZ)
             duration_s = n_frames / UPDATE_RATE_HZ
@@ -887,9 +937,88 @@ class WindWallGUI(QMainWindow):
                 final_coeffs[i, :] = 0.0
         
         return final_coeffs, omega_per_motor
-    
+
+    def toggle_arm(self):
+        """Toggle between armed and disarmed states."""
+        if self.is_armed:
+            self.disarm()
+        else:
+            self.arm_motors()
+
+    def arm_motors(self):
+        """Send idle PWM to all motors as a safety arm signal."""
+        import platform
+        from src.hardware.interface import HardwareInterface
+        from config import NUM_MOTORS
+        try:
+            hw = HardwareInterface(use_mock=(platform.system() != "Linux"))
+            hw.send_pwm(np.full(NUM_MOTORS, 1000.0))
+            hw.close()
+        except Exception as e:
+            QMessageBox.critical(self, "Arm Failed", f"Could not arm motors:\n{e}")
+            return
+        self.is_armed = True
+        self.arm_btn.setText("Disarm")
+        self.arm_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #d32f2f; }
+        """)
+        self.start_btn.setEnabled(True)
+
+    def disarm(self):
+        """Stop any running experiment and reset to disarmed state."""
+        if self.experiment_running:
+            self.stop_experiment()
+        self.is_armed = False
+        self.arm_btn.setText("Arm Motors")
+        self.arm_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #F57C00; }
+        """)
+        self.start_btn.setEnabled(False)
+
+    def toggle_motor_mute(self, motor_id: int):
+        """Toggle a motor's mute state during a running experiment."""
+        if motor_id in self.motor_muted:
+            self.motor_muted.discard(motor_id)
+            self.motor_buttons[motor_id].is_muted = False
+        else:
+            self.motor_muted.add(motor_id)
+            self.motor_buttons[motor_id].is_muted = True
+        self.motor_buttons[motor_id].update_style()
+        self._apply_motor_mask()
+
+    def _apply_motor_mask(self):
+        """Write current mute state into shared memory for the flight loop."""
+        if self.shared_buffer is None:
+            return
+        mask = np.ones(NUM_MOTORS, dtype=np.float64)
+        for mid in self.motor_muted:
+            mask[mid] = 0.0
+        try:
+            self.shared_buffer.set_mask(mask)
+        except Exception as e:
+            print(f"[GUI] Mask write error: {e}")
+
     def start_experiment(self):
         """Start the experiment."""
+        if not self.is_armed:
+            QMessageBox.warning(self, "Not Armed", "Arm the motors before starting!")
+            return
         is_direct = self.signal_mode.currentText() == "Direct (file)"
 
         if is_direct:
@@ -909,8 +1038,12 @@ class WindWallGUI(QMainWindow):
             coeffs, omega_per_motor = self.generate_fourier_coefficients()
             signal_table, signal_rate = None, None
 
-        # Reset experiment timeline for fresh start
+        # Reset experiment timeline and mute state for fresh start
         self.experiment_start_time = None
+        self.motor_muted.clear()
+        for btn in self.motor_buttons:
+            btn.is_muted = False
+            btn.update_style()
 
         # Update UI
         self.experiment_running = True
@@ -927,12 +1060,11 @@ class WindWallGUI(QMainWindow):
             }
         """)
 
-        # Disable configuration during experiment
+        # Disable group/signal configuration during experiment
+        # Motor grid stays enabled so the user can mute individual motors live
         self.groups_list.setEnabled(False)
         self.signal_type.setEnabled(False)
         self.signal_mode.setEnabled(False)
-        for btn in self.motor_buttons:
-            btn.setEnabled(False)
 
         # Start live monitoring
         self.start_live_monitor()
@@ -965,7 +1097,7 @@ class WindWallGUI(QMainWindow):
             self.stop_event = multiprocessing.Event()
             self.shared_buffer = MotorStateBuffer(create=True)
 
-            use_mock = platform.system() == "Darwin"
+            use_mock = platform.system() != "Linux"
 
             flight_kwargs = dict(
                 stop_event=self.stop_event,
@@ -991,8 +1123,15 @@ class WindWallGUI(QMainWindow):
                 daemon=False
             )
             self.flight_process.start()
-            
-            time.sleep(0.5)
+
+            # Wait until flight process writes its first frame (max 3 s)
+            _deadline = time.perf_counter() + 3.0
+            while time.perf_counter() < _deadline:
+                if self.shared_buffer.get_pwm().any():
+                    break
+                time.sleep(0.01)
+            else:
+                print("[GUI] Warning: flight process did not become ready within 3 s")
             
             start_time = time.perf_counter()
             while self.flight_process.is_alive():
@@ -1008,6 +1147,7 @@ class WindWallGUI(QMainWindow):
                 self.flight_process.terminate()
                 self.flight_process.join()
             
+            self.shared_buffer.close()
             self.shared_buffer.unlink()
             
         except Exception as e:
@@ -1128,7 +1268,10 @@ class WindWallGUI(QMainWindow):
         if hasattr(self, '_monitor_buffer'):
             delattr(self, '_monitor_buffer')
         
-        self.start_btn.setEnabled(True)
+        if self.auto_disarm_cb.isChecked():
+            self.disarm()
+        else:
+            self.start_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self.status_label.setText("Finished")
         self.status_label.setStyleSheet("""
@@ -1144,12 +1287,14 @@ class WindWallGUI(QMainWindow):
         if self.monitor_timer:
             self.monitor_timer.stop()
         
-        # Re-enable configuration
+        # Reset any muted motors and re-enable group configuration
+        self.motor_muted.clear()
+        for btn in self.motor_buttons:
+            btn.is_muted = False
+            btn.update_style()
         self.groups_list.setEnabled(True)
         self.signal_type.setEnabled(True)
         self.signal_mode.setEnabled(True)
-        for btn in self.motor_buttons:
-            btn.setEnabled(True)
         
         QMessageBox.information(self, "Experiment Complete", 
                               "Experiment finished! Check the logs folder for data.")
@@ -1157,7 +1302,9 @@ class WindWallGUI(QMainWindow):
 
 def main_gui():
     """Main entry point for GUI."""
-    multiprocessing.set_start_method('fork', force=True)
+    import platform as _platform
+    if _platform.system() != 'Windows':
+        multiprocessing.set_start_method('fork', force=True)
     
     app = QApplication(sys.argv)
     app.setStyle('Fusion')

@@ -182,17 +182,14 @@ class HardwareInterface:
                 byte_val = max(1, min(255, byte_val))
             packet.append(byte_val)
 
-        # 3. Send via SPI
+        # 3. Send via SPI then trigger Sync atomically
+        # Both are in one try block: if SPI fails, Sync is NOT triggered
+        # (sending a sync pulse after a partial/failed frame would latch bad data)
         try:
             self.spi.write_bytes(packet)
-        except Exception as e:
-            print(f"[HW] SPI Write Error: {e}")
-        
-        # 4. Trigger Sync (latches data on all Picos at once)
-        try:
             self.gpio.toggle_sync_pin()
         except Exception as e:
-            print(f"[HW] Sync Error: {e}")
+            print(f"[HW] Send Error (frame {self.frames_sent}): {e}")
         
         if self.frames_sent % 400 == 0:
             print(f"[HW] Frame {self.frames_sent}: Broadcast sent, sync triggered")
@@ -202,5 +199,11 @@ class HardwareInterface:
         try:
             self.spi.close()
             print("[HW] SPI closed")
-        except:
-            pass
+        except Exception as e:
+            print(f"[HW] SPI close error: {e}")
+        try:
+            if not self.use_mock and hasattr(self.gpio, 'line_request'):
+                self.gpio.line_request.release()
+                print("[HW] GPIO released")
+        except Exception as e:
+            print(f"[HW] GPIO close error: {e}")

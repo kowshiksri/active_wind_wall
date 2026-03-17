@@ -157,13 +157,20 @@ def flight_loop(
             # Final clamp to valid PWM range
             pwm_safe = np.clip(pwm_safe, PWM_MIN, PWM_MAX)
             
-            # --- Step 4: Send to hardware ---
+            # --- Step 4: Apply motor enable mask ---
+            # GUI writes 0.0 for muted motors; flight loop snaps those to PWM_MIN.
+            # previous_pwm is updated below with the masked value so un-muting
+            # ramps up smoothly from PWM_MIN via the slew limiter.
+            motor_mask = shared_buffer.get_mask()
+            pwm_safe = np.where(motor_mask > 0.5, pwm_safe, float(PWM_MIN))
+
+            # --- Step 5: Send to hardware ---
             hardware.send_pwm(pwm_safe)
-            
-            # --- Step 5: Update shared memory ---
+
+            # --- Step 6: Update shared memory ---
             shared_buffer.set_pwm(pwm_safe)
             
-            # --- Step 6: Log to CSV (if enabled) ---
+            # --- Step 7: Log to CSV (if enabled) ---
             if enable_logging and csv_writer and frame_count % log_interval_frames == 0:
                 timestamp = datetime.now().isoformat()
                 row = [timestamp]
@@ -172,10 +179,10 @@ def flight_loop(
                 csv_writer.writerow(row)
                 csv_file.flush()  # Ensure data is written
             
-            # --- Step 7: Update state for next iteration ---
+            # --- Step 8: Update state for next iteration ---
             previous_pwm = pwm_safe
-            
-            # --- Step 8: Spinlock until exactly 2.5 ms has elapsed ---
+
+            # --- Step 9: Spinlock until exactly 2.5 ms has elapsed ---
             target_time = loop_start_time + (frame_count * LOOP_TIME_MS / 1000.0)
             while time.perf_counter() < target_time:
                 pass  # Busy-wait for deterministic timing
