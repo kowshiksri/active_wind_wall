@@ -160,6 +160,8 @@ class WindWallGUI(QMainWindow):
         self.flight_process = None
         self.stop_event = None
         self.shared_buffer = None
+        self.heartbeat_stop_event = None
+        self.heartbeat_thread = None
         # Direct signal mode state
         self.direct_signal_table = None   # np.ndarray [n_frames, n_motors] or None
         self.direct_signal_rate_hz = None # sample rate of the loaded table
@@ -946,14 +948,9 @@ class WindWallGUI(QMainWindow):
             self.arm_motors()
 
     def arm_motors(self):
-        """Send idle PWM to all motors as a safety arm signal."""
-        import platform
-        from src.hardware.interface import HardwareInterface
-        from config import NUM_MOTORS
+        """Start heartbeat loop sending 1000 µs to keep ESCs armed."""
         try:
-            hw = HardwareInterface(use_mock=(platform.system() != "Linux"))
-            hw.send_pwm(np.full(NUM_MOTORS, 1000.0))
-            hw.close()
+            self._start_heartbeat()
         except Exception as e:
             QMessageBox.critical(self, "Arm Failed", f"Could not arm motors:\n{e}")
             return
@@ -976,6 +973,7 @@ class WindWallGUI(QMainWindow):
         """Stop any running experiment and reset to disarmed state."""
         if self.experiment_running:
             self.stop_experiment()
+        self._stop_heartbeat()
         self.is_armed = False
         self.arm_btn.setText("Arm Motors")
         self.arm_btn.setStyleSheet("""
@@ -990,6 +988,49 @@ class WindWallGUI(QMainWindow):
             QPushButton:hover { background-color: #F57C00; }
         """)
         self.start_btn.setEnabled(False)
+
+    def _start_heartbeat(self):
+        """Start background thread that sends 1000 µs at 20 Hz while armed."""
+        import threading
+        import time
+        import platform
+        from src.hardware.interface import HardwareInterface
+        from config import NUM_MOTORS
+
+        self._stop_heartbeat()  # ensure no stale thread
+
+        stop = threading.Event()
+        self.heartbeat_stop_event = stop
+
+        def _loop():
+            use_mock = platform.system() != "Linux"
+            hw = HardwareInterface(use_mock=use_mock)
+            idle = np.full(NUM_MOTORS, 1000.0)
+            try:
+                while not stop.is_set():
+                    hw.send_pwm(idle)
+                    time.sleep(0.05)  # 20 Hz — well inside the 200 ms Pico watchdog
+            except Exception as e:
+                print(f"[Heartbeat] Error: {e}")
+            finally:
+                try:
+                    hw.close()
+                except Exception:
+                    pass
+
+        self.heartbeat_thread = threading.Thread(target=_loop, daemon=True, name="ArmedHeartbeat")
+        self.heartbeat_thread.start()
+        print("[Heartbeat] Started — sending 1000 µs at 20 Hz")
+
+    def _stop_heartbeat(self):
+        """Stop the armed heartbeat thread and wait for it to release hardware."""
+        if self.heartbeat_stop_event is not None:
+            self.heartbeat_stop_event.set()
+        if self.heartbeat_thread is not None:
+            self.heartbeat_thread.join(timeout=0.3)  # max one sleep cycle (50 ms) + margin
+        self.heartbeat_stop_event = None
+        self.heartbeat_thread = None
+        print("[Heartbeat] Stopped")
 
     def toggle_motor_mute(self, motor_id: int):
         """Toggle a motor's mute state during a running experiment."""
@@ -1094,6 +1135,9 @@ class WindWallGUI(QMainWindow):
                 any(g.signal_type == "Square Wave" and len(g.motors) > 0 for g in self.groups))
             slew_limit_override = float('inf') if square_wave_present else MAX_PWM_SLEW_LIMIT
 
+            # Stop heartbeat before flight process opens hardware (SPI can't be shared)
+            self._stop_heartbeat()
+
             self.stop_event = multiprocessing.Event()
             self.shared_buffer = MotorStateBuffer(create=True)
 
@@ -1149,7 +1193,11 @@ class WindWallGUI(QMainWindow):
             
             self.shared_buffer.close()
             self.shared_buffer.unlink()
-            
+
+            # Resume heartbeat so ESCs stay armed between experiments
+            if self.is_armed:
+                self._start_heartbeat()
+
         except Exception as e:
             print(f"[GUI] Experiment error: {e}")
             import traceback

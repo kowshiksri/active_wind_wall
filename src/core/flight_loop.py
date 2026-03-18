@@ -206,6 +206,12 @@ def flight_loop(
             csv_file.close()
             print("[FlightLoop] CSV log file closed")
         if 'hardware' in locals():
+            # Send a clean idle frame before releasing hardware so the Pico
+            # sees 1000 µs as the last command (watchdog / heartbeat picks up after).
+            try:
+                hardware.send_pwm(np.full(NUM_MOTORS, float(PWM_MIN)))
+            except Exception:
+                pass
             hardware.close()
         if 'shared_buffer' in locals():
             shared_buffer.close()
