@@ -20,6 +20,10 @@ That's it! The script automatically:
 - Outputs clean `.uf2` files ready to flash
 - Cleans up build artifacts
 
+## Requirements
+
+This build script requires CMake and a host C/C++ build toolchain (e.g. make and GCC/clang) to be installed. It will not run on systems that lack CMake/build support — for example, the current Raspberry Pi used for development cannot perform the build. Run the Python build script only on systems with CMake and the necessary build tools available.
+
 ## File Structure
 
 ```
