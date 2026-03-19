@@ -65,6 +65,12 @@ volatile uint8_t byte_index = 0;  // Current position in 36-byte frame (0..35)
 // PWM CONTROL
 // ==========================================
 void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
+    // 0 = PWM off (no pulse output at all)
+    if (pulse_us == 0) {
+        pwm_set_chan_level(slices[motor_index], channels[motor_index], 0);
+        return;
+    }
+
     // Clamp to valid PWM range
     if (pulse_us < 1000) pulse_us = 1000;
     if (pulse_us > 2000) pulse_us = 2000;
@@ -129,8 +135,8 @@ int main() {
         motor_values[i] = 0;
         active_frame_buffer[i] = 0;
         
-        // Set motors to idle position (1000 us pulse)
-        set_motor_pwm_us(i, 1000);
+        // Boot with PWM off — no pulse until GUI arms the system
+        set_motor_pwm_us(i, 0);
     }
 
     // Configure SPI in slave mode
@@ -217,9 +223,9 @@ int main() {
         // If no SYNC received for >200ms, assume communication lost
         // Set all motors to idle and blink LED rapidly
         if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
-            // Emergency stop: all motors to idle
+            // Emergency stop: cut PWM output entirely (no pulse)
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                set_motor_pwm_us(i, 1000);
+                set_motor_pwm_us(i, 0);
             }
             
             // Fast LED blink (5 Hz) to indicate error state
