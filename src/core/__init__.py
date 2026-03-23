@@ -11,15 +11,13 @@ from config import NUM_MOTORS, SHARED_MEM_NAME
 
 class MotorStateBuffer:
     """
-    Manages a shared memory buffer for motor PWM commands and enable mask.
+    Manages a shared memory buffer for motor PWM commands.
 
-    Layout (two contiguous float64 arrays):
-    - Bytes   0 – 287 : PWM values  [36 × float64]  (1000–2000 µs)
-    - Bytes 288 – 575 : Enable mask  [36 × float64]  (1.0 = on, 0.0 = muted)
+    Layout:
+    - Bytes 0 – 287 : PWM values  [36 × float64]  (1000–2000 µs)
     """
 
-    _PWM_OFFSET  = 0
-    _MASK_OFFSET = NUM_MOTORS * 8  # 288 bytes in
+    _PWM_OFFSET = 0
 
     def __init__(self, create: bool = True):
         """
@@ -42,26 +40,21 @@ class MotorStateBuffer:
                 except (FileNotFoundError, ValueError):
                     pass
 
-                # Create new shared memory block (PWM array + mask array)
+                # Create new shared memory block (PWM array only)
                 self.shm = shared_memory.SharedMemory(
                     name=self.name,
                     create=True,
-                    size=NUM_MOTORS * 8 * 2  # 576 bytes total
+                    size=NUM_MOTORS * 8  # 288 bytes
                 )
                 self.array = np.ndarray(self.shape, dtype=self.dtype,
                                         buffer=self.shm.buf, offset=self._PWM_OFFSET)
-                self.mask  = np.ndarray(self.shape, dtype=self.dtype,
-                                        buffer=self.shm.buf, offset=self._MASK_OFFSET)
                 self.array[:] = 0.0
-                self.mask[:]  = 1.0  # All motors enabled by default
                 print(f"[SharedMem] Created new buffer: {self.name}")
             else:
                 # Attach to existing shared memory
                 self.shm = shared_memory.SharedMemory(name=self.name)
                 self.array = np.ndarray(self.shape, dtype=self.dtype,
                                         buffer=self.shm.buf, offset=self._PWM_OFFSET)
-                self.mask  = np.ndarray(self.shape, dtype=self.dtype,
-                                        buffer=self.shm.buf, offset=self._MASK_OFFSET)
                 print(f"[SharedMem] Attached to existing buffer: {self.name}")
 
         except Exception as e:
@@ -76,20 +69,12 @@ class MotorStateBuffer:
         """Read PWM values from shared memory."""
         return self.array.copy()
 
-    def set_mask(self, mask: np.ndarray) -> None:
-        """Write enable mask (1.0 = on, 0.0 = muted) into shared memory."""
-        self.mask[:] = mask
-
-    def get_mask(self) -> np.ndarray:
-        """Read enable mask from shared memory."""
-        return self.mask.copy()
-    
     def close(self) -> None:
         """Close the shared memory buffer (does not unlink)."""
         if self.shm:
             self.shm.close()
             print(f"[SharedMem] Closed buffer: {self.name}")
-    
+
     def unlink(self) -> None:
         """Unlink the shared memory buffer (cleanup)."""
         if self.shm:

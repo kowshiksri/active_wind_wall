@@ -174,20 +174,13 @@ def flight_loop(
             # Final clamp to valid PWM range
             pwm_safe = np.clip(pwm_safe, PWM_MIN, PWM_MAX)
             
-            # --- Step 4: Apply motor enable mask ---
-            # GUI writes 0.0 for muted motors; flight loop snaps those to PWM_MIN.
-            # previous_pwm is updated below with the masked value so un-muting
-            # ramps up smoothly from PWM_MIN via the slew limiter.
-            motor_mask = shared_buffer.get_mask()
-            pwm_safe = np.where(motor_mask > 0.5, pwm_safe, float(PWM_MIN))
-
-            # --- Step 5: Send to hardware ---
+            # --- Step 4: Send to hardware ---
             hardware.send_pwm(pwm_safe)
 
-            # --- Step 6: Update shared memory ---
+            # --- Step 5: Update shared memory ---
             shared_buffer.set_pwm(pwm_safe)
-            
-            # --- Step 7: Log to CSV (if enabled) ---
+
+            # --- Step 6: Log to CSV (if enabled) ---
             if enable_logging and csv_writer and frame_count % log_interval_frames == 0:
                 timestamp = datetime.now().isoformat()
                 row = [timestamp]
@@ -199,10 +192,10 @@ def flight_loop(
                 if frame_count % 400 == 0:
                     csv_file.flush()
 
-            # --- Step 8: Update state for next iteration ---
+            # --- Step 7: Update state for next iteration ---
             previous_pwm = pwm_safe
 
-            # --- Step 9: Hybrid sleep + short spinlock ---
+            # --- Step 8: Hybrid sleep + short spinlock ---
             # Sleep for most of the remaining frame time to yield the CPU (avoids
             # 100% CPU usage which causes Windows thermal throttling and preemption).
             # Busy-wait only the last 0.5 ms for sub-millisecond timing accuracy.
@@ -214,7 +207,7 @@ def flight_loop(
             while time.perf_counter() < target_time:
                 pass  # short spinlock for final precision
 
-            # --- Step 10: Self-terminate when duration_s elapsed ---
+            # --- Step 9: Self-terminate when duration_s elapsed ---
             if duration_s is not None and frame_time >= duration_s:
                 stop_event.set()
             

@@ -15,7 +15,6 @@ This is **v1** — the execution and hardware foundation. Signal trajectories ar
 - **Write a JSON metadata sidecar** alongside every CSV log — groups, duration, signal mode, start time
 - **Save and load experiment presets** — group layout, motor assignments, and signal parameters as JSON
 - **Arm and maintain ESCs** via a persistent 20 Hz SPI heartbeat between experiments
-- **Mute individual motors live** during a running experiment
 - **Provide a GUI** for configuring groups, signals, arming, and monitoring motor state during playback
 
 ## What v1 Does Not Do
@@ -217,9 +216,8 @@ python gui_interface.py
 5. **Save preset** (optional) — click **Save Preset** to export the current configuration for reuse
 6. **Arm motors** — click "Arm Motors"; the system sends a 20 Hz heartbeat to keep ESCs armed
 7. **Set duration** and click **Start** to begin playback; monitor live PWM in the oscilloscope panel
-8. **Mute motors live** — click any motor button during an experiment to toggle it off/on
-9. Logs saved automatically to `logs/flight_log_<stem>.csv` and `logs/flight_log_<stem>.json`
-10. Click **Disarm** when finished
+8. Logs saved automatically to `logs/flight_log_<stem>.csv` and `logs/flight_log_<stem>.json`
+9. Click **Disarm** when finished
 
 ## CLI Workflow
 
@@ -272,9 +270,9 @@ Motor-to-Pico assignments are configured via `PICO_MOTOR_MAP` in `config/__init_
 ## Implementation Notes
 
 - **Timing:** hybrid sleep + 0.5 ms spinlock per frame; sleep yields the CPU to prevent thermal throttling, spinlock ensures sub-millisecond final accuracy. On RPi5 jitter is typically < 0.1 ms.
-- **IPC:** `multiprocessing.shared_memory` — 576 bytes (PWM array + enable mask). Flight loop writes, GUI reads. No locks needed (one writer, one reader, float64 atomic on ARM).
 - **Arming:** a background thread sends 36 × 1000 µs at 20 Hz whenever the system is armed but no experiment is running. The flight loop takes over hardware on experiment start and returns it on stop.
 - **Amplitude floor:** `amp_min_per_motor` array passed from GUI to flight loop. Unassigned motors have `amp_min = 0` so they always receive 1000 µs. Assigned motors with `amp_min > 0` never drop below their floor, eliminating the hard PWM discontinuity at the wave trough.
+- **IPC:** `multiprocessing.shared_memory` — 288 bytes (PWM array only). Flight loop writes, GUI reads.
 - **Startup seeding:** `previous_pwm` is initialised from `signal_gen.get_flow_field(0.0)`, not from `PWM_CENTER`, so there is no forced ramp at experiment start.
 - **Duration:** `duration_s` is passed directly into `flight_loop()`. The loop self-terminates when `frame_time ≥ duration_s`, independent of GUI thread timing. The GUI sets `stop_event` as a fallback.
 - **Logging:** CSV flushed every ~1 s (400 frames) and on file close. Per-frame flushing was removed as it caused multi-second stalls in the control loop on some systems.

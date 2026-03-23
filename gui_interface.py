@@ -69,20 +69,14 @@ class MotorButton(QPushButton):
         self.motor_id = motor_id
         self.parent_gui = parent_gui
         self.assigned_group = None
-        self.is_muted = False
         self.setMinimumSize(60, 60)
         self.setMaximumSize(60, 60)
         self.update_style()
         self.clicked.connect(self.on_click)
 
     def on_click(self):
-        """Handle motor button click.
-
-        During experiment: toggle mute for this motor.
-        Outside experiment: assign/unassign to selected group.
-        """
+        """Assign/unassign motor to selected group."""
         if self.parent_gui.experiment_running:
-            self.parent_gui.toggle_motor_mute(self.motor_id)
             return
 
         selected_group = self.parent_gui.get_selected_group()
@@ -101,22 +95,8 @@ class MotorButton(QPushButton):
             self.update_style()
 
     def update_style(self):
-        """Update button appearance based on group assignment and mute state."""
-        if self.is_muted:
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #424242;
-                    color: #888888;
-                    border: 2px dashed #666666;
-                    border-radius: 8px;
-                    font-size: 12px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #555555;
-                }
-            """)
-        elif self.assigned_group:
+        """Update button appearance based on group assignment."""
+        if self.assigned_group:
             bg_color, border_color = self.assigned_group.get_color()
             self.setStyleSheet(f"""
                 QPushButton {{
@@ -156,7 +136,6 @@ class WindWallGUI(QMainWindow):
         self.motor_buttons = []
         self.experiment_running = False
         self.is_armed = False
-        self.motor_muted = set()  # Set of motor IDs muted during experiment
         self.flight_process = None
         self.stop_event = None
         self.shared_buffer = None
@@ -1171,29 +1150,6 @@ class WindWallGUI(QMainWindow):
         self.heartbeat_thread = None
         print("[Heartbeat] Stopped")
 
-    def toggle_motor_mute(self, motor_id: int):
-        """Toggle a motor's mute state during a running experiment."""
-        if motor_id in self.motor_muted:
-            self.motor_muted.discard(motor_id)
-            self.motor_buttons[motor_id].is_muted = False
-        else:
-            self.motor_muted.add(motor_id)
-            self.motor_buttons[motor_id].is_muted = True
-        self.motor_buttons[motor_id].update_style()
-        self._apply_motor_mask()
-
-    def _apply_motor_mask(self):
-        """Write current mute state into shared memory for the flight loop."""
-        if self.shared_buffer is None:
-            return
-        mask = np.ones(NUM_MOTORS, dtype=np.float64)
-        for mid in self.motor_muted:
-            mask[mid] = 0.0
-        try:
-            self.shared_buffer.set_mask(mask)
-        except Exception as e:
-            print(f"[GUI] Mask write error: {e}")
-
     def start_experiment(self):
         """Start the experiment."""
         if not self.is_armed:
@@ -1218,12 +1174,8 @@ class WindWallGUI(QMainWindow):
             coeffs, omega_per_motor, amp_min_per_motor = self.generate_fourier_coefficients()
             signal_table, signal_rate = None, None
 
-        # Reset experiment timeline and mute state for fresh start
+        # Reset experiment timeline for fresh start
         self.experiment_start_time = None
-        self.motor_muted.clear()
-        for btn in self.motor_buttons:
-            btn.is_muted = False
-            btn.update_style()
 
         # Update UI
         self.experiment_running = True
@@ -1241,7 +1193,6 @@ class WindWallGUI(QMainWindow):
         """)
 
         # Disable group/signal configuration during experiment
-        # Motor grid stays enabled so the user can mute individual motors live
         self.groups_list.setEnabled(False)
         self.signal_type.setEnabled(False)
         self.signal_mode.setEnabled(False)
@@ -1512,11 +1463,7 @@ class WindWallGUI(QMainWindow):
         if self.monitor_timer:
             self.monitor_timer.stop()
         
-        # Reset any muted motors and re-enable group configuration
-        self.motor_muted.clear()
-        for btn in self.motor_buttons:
-            btn.is_muted = False
-            btn.update_style()
+        # Re-enable group configuration
         self.groups_list.setEnabled(True)
         self.signal_type.setEnabled(True)
         self.signal_mode.setEnabled(True)
