@@ -884,6 +884,20 @@ class WindWallGUI(QMainWindow):
         amplitude = swing / 2.0
         dc_offset = swing / 2.0
 
+        # When amp_min = 0, the trough must reliably go below 0 so the flight loop
+        # snaps to PWM_MIN (1000 µs). Two effects prevent this without a margin:
+        #   - Sine wave: floating-point noise leaves trough at +1e-10 instead of 0
+        #   - Square wave: Gibbs phenomenon keeps the Fourier minimum ~4.5% above 0
+        # Subtracting a trough margin shifts dc_offset just below amplitude so the
+        # SignalGenerator clips the negative trough to 0.0, and the flight loop
+        # condition (signal <= 0 AND amp_min <= 0) reliably fires → 1000 µs.
+        if amp_min <= 0.0 and swing > 0.0:
+            if signal_type == "Square Wave":
+                trough_margin = 0.06 * swing  # overcome Gibbs (~4.5% of amplitude)
+            else:
+                trough_margin = 0.001 * swing  # floating-point safety for sine
+            dc_offset -= trough_margin
+
         if signal_type == "Sine Wave":
             coeffs = generate_sine_wave(
                 n_motors=NUM_MOTORS,
@@ -903,7 +917,7 @@ class WindWallGUI(QMainWindow):
                 n_terms=n_terms,
                 base_freq=base_freq
             )
-            coeffs[:, 0] = dc_offset  # midpoint of [0, swing]
+            coeffs[:, 0] = dc_offset  # midpoint shifted below amplitude to ensure trough < 0
         else:  # Constant DC
             coeffs = generate_uniform(
                 n_motors=NUM_MOTORS,

@@ -7,6 +7,7 @@ import platform
 import time
 from typing import List, Optional
 import numpy as np
+from config import PWM_MIN, PWM_MIN_RUNNING, PWM_MAX
 
 # Physical motor-to-byte mapping based on actual wiring configuration
 # This maps motor IDs (0-35) to byte positions (0-35) in the SPI packet
@@ -171,14 +172,17 @@ class HardwareInterface:
         # 1. Reorder motors to match physical wiring configuration
         reordered_pwm = np.array([pwm_values[i] for i in PHYSICAL_MOTOR_ORDER])
         
-        # 2. Convert PWM values (1000-2000 us) to byte values (0-255)
+        # 2. Convert PWM values to byte values (0-255)
+        #    0       → PWM_MIN (armed/stopped)
+        #    1–255   → PWM_MIN_RUNNING to PWM_MAX (spinning range)
+        _range = PWM_MAX - PWM_MIN_RUNNING
         packet = []
         for pwm in reordered_pwm:
-            if pwm < 1200:
+            if pwm < PWM_MIN_RUNNING:
                 byte_val = 0x00
             else:
-                clipped = max(1200, min(2000, pwm))
-                byte_val = 1 + int((clipped - 1200) * 254 / 800)
+                clipped = max(PWM_MIN_RUNNING, min(PWM_MAX, pwm))
+                byte_val = 1 + int((clipped - PWM_MIN_RUNNING) * 254 / _range)
                 byte_val = max(1, min(255, byte_val))
             packet.append(byte_val)
 
