@@ -1,25 +1,26 @@
 # Active Wind Wall — v1: Deterministic Playback Control
 
-A deterministic motor control platform for a 6×6 fan array (36 motors). Signals are fully pre-computed before an experiment starts and played back at a fixed rate with hardware safety constraints. Runs on macOS (mock hardware) or Raspberry Pi 5 + Pico (real hardware).
+A deterministic motor control platform for a 6×6 fan array (36 motors). Signals are fully pre-computed before an experiment starts and played back at a fixed rate with hardware safety constraints. Runs on Raspberry Pi 5 + Pico (real hardware) or any machine with mock drivers for development.
 
-This is **v1** — the execution and hardware foundation. It is intentionally scope-limited: signal trajectories are decided before the experiment runs, not during it. Closed-loop and autonomous control are the goals of v2.
+This is **v1** — the execution and hardware foundation. Signal trajectories are decided before the experiment runs, not during it. Closed-loop and autonomous control are the goals of v2.
 
 ---
 
 ## What v1 Does
 
 - **Pre-compute signal trajectories** for each motor group before the experiment starts
-- **Play back those trajectories** at a configurable rate (default 400 Hz) with deterministic timing
-- **Enforce safety constraints** on every tick: slew-rate limiting and PWM bounds
+- **Play back those trajectories** at 400 Hz with deterministic hybrid-sleep timing
+- **Enforce safety constraints** on every tick: slew-rate limiting, PWM bounds, motor enable mask
 - **Log all motor states** to CSV for post-experiment analysis
-- **Provide a GUI** for configuring groups, signals, and monitoring motor state during playback
+- **Arm and maintain ESCs** via a persistent 20 Hz SPI heartbeat between experiments
+- **Mute individual motors live** during a running experiment
+- **Provide a GUI** for configuring groups, signals, arming, and monitoring motor state during playback
 
 ## What v1 Does Not Do
 
-- Motors cannot be changed or overridden while an experiment is running
-- There is no sensor input or feedback of any kind
-- Signal trajectories are fixed at experiment start — the system is open-loop
-- No arming state machine yet (pending firmware work on the Pico side)
+- No sensor input or feedback of any kind — fully open-loop
+- Signal trajectories are fixed at experiment start and cannot be modified mid-run
+- No closed-loop or autonomous control (v2)
 
 ---
 
@@ -32,10 +33,10 @@ Two modes are available, selectable in the GUI before starting an experiment.
 Motors are organised into groups. Each group is assigned a signal type and parameters. Signals are pre-computed as Fourier coefficient matrices, then reconstructed sample-by-sample during playback.
 
 Available signal types per group:
-- **Sine wave** — frequency (Hz), amplitude, phase offset
-- **Square wave** — synthesised from odd harmonics
+- **Sine wave** — configurable period, amplitude min/max, phase offset
+- **Square wave** — synthesised from odd harmonics (50% duty cycle)
 - **Constant DC** — fixed motor speed
-- **Custom Fourier** — manually specify individual harmonics
+- **Custom Fourier** — manually specify individual harmonics, amplitudes, and phases
 
 ### Mode 2 — Direct (file)
 
@@ -59,14 +60,16 @@ Signal duration is implicit in the array shape: `duration = n_frames / sample_ra
 
 ## PWM Mapping
 
-Motors use a two-zone mapping with no dead zone:
+Motors use a two-zone mapping per motor:
 
-| Signal value | PWM output | Motor state |
+| Condition | PWM output | Motor state |
 |---|---|---|
-| `0.0` | 1000 µs | Armed / stopped |
-| `> 0.0` | 1200 µs → 2000 µs (linear) | Spinning |
+| `signal ≤ 0` and `amp_min = 0` | 1000 µs | Armed / stopped |
+| `signal > 0` or `amp_min > 0` | `1200 + (amp_min + signal) × 800` µs | Spinning |
 
-Even `signal = 0.01` immediately produces the minimum running speed (1200 µs). There is no range of signal values that maps below the running threshold.
+**Amplitude floor (`amp_min`):** when a group's minimum amplitude is set above zero, the motor never drops below `1200 + amp_min × 800` µs while running — it maintains a minimum spinning speed rather than stopping at the wave trough. Motors not assigned to any group always receive 1000 µs (armed/idle), regardless of other groups' `amp_min` settings.
+
+**Signal swing:** the Fourier signal is generated to swing from `0` to `(amp_max − amp_min)`. The `amp_min` offset is added at the PWM mapping stage, so the waveform trough always aligns with the minimum running speed and there is no discontinuity.
 
 ## Slew Rate Limiting
 
@@ -76,7 +79,7 @@ Even `signal = 0.01` immediately produces the minimum running speed (1200 µs). 
 per_tick_limit = MAX_PWM_SLEW_LIMIT × LOOP_TIME_MS
 ```
 
-Default: 25 µs/ms (derived from the original 50 DShot units/ms hardware specification).
+Default: 25 µs/ms. Square waves bypass the slew limiter to allow instantaneous transitions.
 
 ---
 
@@ -95,7 +98,7 @@ active_wind_wall/
 │   │   └── flight_loop.py           # Deterministic playback loop
 │   ├── hardware/
 │   │   ├── __init__.py
-│   │   └── interface.py             # SPI drivers (real on Pi5, mock on macOS)
+│   │   └── interface.py             # SPI drivers (real on Pi5, mock on dev)
 │   └── physics/
 │       ├── __init__.py              # SignalGenerator, DirectSignalGenerator
 │       └── signal_designer.py       # Fourier coefficient pre-computation
@@ -116,7 +119,7 @@ active_wind_wall/
 
 ## Quick Start
 
-### Development (macOS / Linux)
+### Development (Linux / macOS)
 
 ```bash
 cd active_wind_wall
@@ -146,10 +149,13 @@ python gui_interface.py
 ## GUI Workflow
 
 1. `python gui_interface.py`
-2. **Create groups** — click "New Group", assign motors from the grid
-3. **Configure signals** — choose signal mode, set parameters per group
-4. **Start experiment** — set duration, click Start, monitor live PWM graph
-5. Logs saved automatically to `logs/flight_log_YYYYMMDD_HHMMSS.csv`
+2. **Create groups** — click "New Group", assign motors from the 6×6 grid
+3. **Configure signals** — choose signal mode, set parameters per group (signal type, amplitude min/max, period, phase offset)
+4. **Arm motors** — click "Arm Motors"; the system sends a 20 Hz heartbeat to keep ESCs armed
+5. **Set duration** and click **Start** to begin playback; monitor live PWM in the oscilloscope panel
+6. **Mute motors live** — click any motor button during an experiment to toggle it off/on
+7. Logs saved automatically to `logs/flight_log_YYYYMMDD_HHMMSS.csv`
+8. Click **Disarm** when finished
 
 ## CLI Workflow
 
@@ -181,10 +187,10 @@ All constants in `config/__init__.py`:
 | `NUM_MOTORS` | 36 | Motors in the 6×6 grid |
 | `UPDATE_RATE_HZ` | 400 | Playback loop frequency |
 | `PWM_MIN` | 1000 µs | Arm / stopped |
-| `PWM_MIN_RUNNING` | 1200 µs | Minimum spinning speed (characterise per motor) |
+| `PWM_MIN_RUNNING` | 1200 µs | Minimum spinning speed (provisional — characterise per motor) |
 | `PWM_MAX` | 2000 µs | Full throttle |
 | `MAX_PWM_SLEW_LIMIT` | 25.0 µs/ms | Absolute slew limit — independent of loop rate |
-| `FOURIER_TERMS` | 7 | Harmonics for Fourier reconstruction |
+| `FOURIER_TERMS` | 7 | Default harmonics for Fourier reconstruction |
 | `BASE_FREQUENCY` | 1.0 Hz | Default base frequency |
 
 ---
@@ -195,16 +201,20 @@ All constants in `config/__init__.py`:
 - **4× Raspberry Pi Pico** — each drives 9 motors via PWM; firmware in `pico/`
 - **Motor grid** — 6×6, divided into 4 quadrants (one per Pico)
 
-Motor-to-Pico assignments are configured via `PICO_MOTOR_MAP` in `config/__init__.py`. Platform detection is automatic — same code runs on macOS (mock) and Pi (real SPI).
+Motor-to-Pico assignments are configured via `PICO_MOTOR_MAP` in `config/__init__.py`. Platform detection is automatic — same code runs in mock mode on any non-Pi machine.
 
 ---
 
 ## Implementation Notes
 
-- **Timing**: busy-spinwait loop for deterministic 2.5 ms ticks; jitter on RPi5 typically < 0.1 ms
-- **IPC**: `multiprocessing.shared_memory` for one-directional state passing from flight loop to GUI monitor
-- **Startup seeding**: `previous_pwm` is initialised from `signal_gen.get_flow_field(0.0)`, not from `PWM_CENTER`, so there is no forced ramp at experiment start
-- **Hardware abstraction**: `interface.py` encodes PWM → bytes; the flight loop only calls `hardware.send_pwm()` and is protocol-agnostic (PWM today, DShot in future)
+- **Timing:** hybrid sleep + 0.5 ms spinlock per frame; sleep yields the CPU to prevent thermal throttling, spinlock ensures sub-millisecond final accuracy. On RPi5 jitter is typically < 0.1 ms.
+- **IPC:** `multiprocessing.shared_memory` — 576 bytes (PWM array + enable mask). Flight loop writes, GUI reads. No locks needed (one writer, one reader, float64 atomic on ARM).
+- **Arming:** a background thread sends 36 × 1000 µs at 20 Hz whenever the system is armed but no experiment is running. The flight loop takes over hardware on experiment start and returns it on stop.
+- **Amplitude floor:** `amp_min_per_motor` array passed from GUI to flight loop. Unassigned motors have `amp_min = 0` so they always receive 1000 µs. Assigned motors with `amp_min > 0` never drop below their floor, eliminating the hard PWM discontinuity at the wave trough.
+- **Startup seeding:** `previous_pwm` is initialised from `signal_gen.get_flow_field(0.0)`, not from `PWM_CENTER`, so there is no forced ramp at experiment start.
+- **Duration:** `duration_s` is passed directly into `flight_loop()`. The loop self-terminates when `frame_time ≥ duration_s`, independent of GUI thread timing. The GUI sets `stop_event` as a fallback.
+- **Logging:** CSV flushed every ~1 s (400 frames) and on file close. Per-frame flushing was removed as it caused multi-second stalls in the control loop on some systems.
+- **Hardware abstraction:** `interface.py` encodes PWM → bytes; the flight loop only calls `hardware.send_pwm()` and is protocol-agnostic (PWM today, DShot in future).
 
 ---
 
@@ -213,7 +223,9 @@ Motor-to-Pico assignments are configured via `PICO_MOTOR_MAP` in `config/__init_
 | Issue | Solution |
 |---|---|
 | GUI won't launch | `pip install --upgrade PyQt6` |
-| Motors don't move | Verify Pico firmware is flashed and motors are powered |
+| Motors don't move | Verify Pico firmware is flashed, motors are powered, and "Arm Motors" was clicked |
+| ESCs keep disarming | Confirm heartbeat is running (Arm button should show "Disarm") |
 | Jerky motor movement | Reduce `MAX_PWM_SLEW_LIMIT` or increase `FOURIER_TERMS` |
 | High timing jitter | Close other applications; `nice -n -20 python gui_interface.py` |
+| Log has large time gaps | Ensure no other heavy I/O processes are running; hybrid sleep should prevent this |
 | Import errors | Check venv is active: `source venv/bin/activate` |
