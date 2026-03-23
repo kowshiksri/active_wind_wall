@@ -466,6 +466,32 @@ class WindWallGUI(QMainWindow):
         
         layout.addStretch()
 
+        # Preset save / load
+        preset_layout = QHBoxLayout()
+        save_preset_btn = QPushButton("Save Preset")
+        save_preset_btn.setToolTip("Save current group and signal configuration to a JSON file")
+        save_preset_btn.clicked.connect(self.save_preset)
+        load_preset_btn = QPushButton("Load Preset")
+        load_preset_btn.setToolTip("Load a previously saved configuration from a JSON file")
+        load_preset_btn.clicked.connect(self.load_preset)
+        for btn in (save_preset_btn, load_preset_btn):
+            btn.setMinimumHeight(36)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #607D8B;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    font-size: 12px;
+                }
+                QPushButton:hover { background-color: #455A64; }
+            """)
+        preset_layout.addWidget(save_preset_btn)
+        preset_layout.addWidget(load_preset_btn)
+        layout.addLayout(preset_layout)
+
+        layout.addSpacing(6)
+
         self.arm_btn = QPushButton("Arm Motors")
         self.arm_btn.setMinimumHeight(45)
         self.arm_btn.setStyleSheet("""
@@ -941,6 +967,118 @@ class WindWallGUI(QMainWindow):
 
         return final_coeffs, omega_per_motor, amp_min_per_motor
 
+    # ------------------------------------------------------------------
+    # Preset save / load
+    # ------------------------------------------------------------------
+
+    def _groups_to_dict(self):
+        """Serialise all groups to a JSON-safe list."""
+        out = []
+        for g in self.groups:
+            out.append({
+                'name': g.name,
+                'color_index': g.color_index,
+                'motors': sorted(g.motors),
+                'signal_type': g.signal_type,
+                'amp_min': g.amp_min,
+                'amp_max': g.amp_max,
+                'dc_value': g.dc_value,
+                'period': g.period,
+                'phase_offset': g.phase_offset,
+                'fourier_terms': g.fourier_terms,
+                'custom_harmonics': g.custom_harmonics,
+            })
+        return out
+
+    def save_preset(self):
+        """Save current group and signal configuration to a JSON file."""
+        import json
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Preset", "", "Preset files (*.json);;All files (*)"
+        )
+        if not path:
+            return
+        if not path.endswith('.json'):
+            path += '.json'
+        data = {
+            'signal_mode': self.signal_mode.currentText(),
+            'groups': self._groups_to_dict(),
+        }
+        try:
+            with open(path, 'w') as f:
+                json.dump(data, f, indent=2)
+            print(f"[Preset] Saved to {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save failed", str(e))
+
+    def load_preset(self):
+        """Load a group configuration from a JSON preset file."""
+        import json
+        if self.experiment_running:
+            QMessageBox.warning(self, "Experiment running",
+                                "Stop the experiment before loading a preset.")
+            return
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Preset", "", "Preset files (*.json);;All files (*)"
+        )
+        if not path:
+            return
+        try:
+            with open(path) as f:
+                data = json.load(f)
+
+            # Clear existing assignments
+            self.clear_all_motors()
+            for _ in range(len(self.groups) - 1):
+                # Remove all but one group
+                if len(self.groups) > 1:
+                    self.groups.pop()
+                    self.groups_list.takeItem(self.groups_list.count() - 1)
+
+            # Rebuild groups
+            self.groups.clear()
+            self.groups_list.clear()
+            for gd in data.get('groups', []):
+                g = MotorGroup(gd['name'], gd.get('color_index', 0))
+                g.motors = set(gd.get('motors', []))
+                g.signal_type = gd.get('signal_type', 'Sine Wave')
+                g.amp_min = gd.get('amp_min', 0.0)
+                g.amp_max = gd.get('amp_max', 1.0)
+                g.dc_value = gd.get('dc_value', 0.5)
+                g.period = gd.get('period', 2.0)
+                g.phase_offset = gd.get('phase_offset', 0.0)
+                g.fourier_terms = gd.get('fourier_terms', 7)
+                g.custom_harmonics = gd.get('custom_harmonics', [])
+                self.groups.append(g)
+                self.groups_list.addItem(g.name)
+
+            # Restore motor button assignments
+            for btn in self.motor_buttons:
+                btn.assigned_group = None
+                for g in self.groups:
+                    if btn.motor_id in g.motors:
+                        btn.assigned_group = g
+                        break
+                btn.update_style()
+
+            # Restore signal mode
+            mode = data.get('signal_mode', 'Fourier (per group)')
+            idx = self.signal_mode.findText(mode)
+            if idx >= 0:
+                self.signal_mode.setCurrentIndex(idx)
+
+            # Select first group to populate controls
+            if self.groups:
+                self.groups_list.setCurrentRow(0)
+                self.selected_group_index = 0
+                self.on_group_selected(0)
+
+            self.update_active_count()
+            self.update_monitor_group_list()
+            print(f"[Preset] Loaded from {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Load failed", str(e))
+
     def toggle_arm(self):
         """Toggle between armed and disarmed states."""
         if self.is_armed:
@@ -1123,8 +1261,12 @@ class WindWallGUI(QMainWindow):
     def run_experiment_thread(self, coeffs, omega_per_motor, amp_min_per_motor,
                               signal_table=None, signal_sample_rate_hz=None):
         """Run the experiment (called in separate thread)."""
+        import json
         try:
             duration = self.duration.value()
+            # Shared log stem — both CSV and JSON sidecar use the same name
+            from datetime import datetime as _dt
+            log_stem = _dt.now().strftime('%Y%m%d_%H%M%S')
 
             import platform
             import time
@@ -1151,6 +1293,7 @@ class WindWallGUI(QMainWindow):
                 log_interval_frames=40,
                 slew_limit_override=slew_limit_override,
                 duration_s=float(duration),
+                log_stem=log_stem,
             )
             if signal_table is not None:
                 flight_kwargs['signal_table'] = signal_table
@@ -1178,6 +1321,28 @@ class WindWallGUI(QMainWindow):
                 daemon=False
             )
             self.flight_process.start()
+
+            # Write JSON metadata sidecar alongside the CSV log
+            try:
+                from pathlib import Path as _Path
+                sidecar = {
+                    'log_stem': log_stem,
+                    'experiment_start': _dt.now().isoformat(),
+                    'duration_s': float(duration),
+                    'signal_mode': 'Direct' if signal_table is not None else 'Fourier',
+                    'groups': self._groups_to_dict(),
+                }
+                if signal_table is not None:
+                    sidecar['direct_file_rows'] = int(signal_table.shape[0])
+                    sidecar['direct_file_cols'] = int(signal_table.shape[1])
+                    sidecar['direct_sample_rate_hz'] = signal_sample_rate_hz
+                sidecar_path = _Path('logs') / f'flight_log_{log_stem}.json'
+                sidecar_path.parent.mkdir(exist_ok=True)
+                with open(sidecar_path, 'w') as _f:
+                    json.dump(sidecar, _f, indent=2)
+                print(f"[GUI] Metadata sidecar written: {sidecar_path}")
+            except Exception as _e:
+                print(f"[GUI] Warning: could not write metadata sidecar: {_e}")
 
             # Wait until flight process writes its first frame (max 3 s),
             # then anchor the monitor clock to that exact moment so the GUI

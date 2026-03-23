@@ -12,6 +12,8 @@ This is **v1** — the execution and hardware foundation. Signal trajectories ar
 - **Play back those trajectories** at 400 Hz with deterministic hybrid-sleep timing
 - **Enforce safety constraints** on every tick: slew-rate limiting, PWM bounds, motor enable mask
 - **Log all motor states** to CSV for post-experiment analysis
+- **Write a JSON metadata sidecar** alongside every CSV log — groups, duration, signal mode, start time
+- **Save and load experiment presets** — group layout, motor assignments, and signal parameters as JSON
 - **Arm and maintain ESCs** via a persistent 20 Hz SPI heartbeat between experiments
 - **Mute individual motors live** during a running experiment
 - **Provide a GUI** for configuring groups, signals, arming, and monitoring motor state during playback
@@ -83,6 +85,66 @@ Default: 25 µs/ms. Square waves bypass the slew limiter to allow instantaneous 
 
 ---
 
+## Experiment Presets
+
+Group configurations can be saved to and loaded from JSON files via the GUI.
+
+**What is saved:**
+- Signal mode (Fourier / Direct)
+- All groups: name, color, motor assignments, signal type, amplitude min/max, period, phase offset, Fourier terms, custom harmonics
+
+**Usage:**
+- Click **Save Preset** to export the current configuration to a `.json` file
+- Click **Load Preset** to restore a configuration — all groups and motor assignments are rebuilt exactly as saved
+- Presets cannot be loaded while an experiment is running
+
+**Preset file format:**
+```json
+{
+  "signal_mode": "Fourier (per group)",
+  "groups": [
+    {
+      "name": "Group 1",
+      "color_index": 0,
+      "motors": [0, 1, 2, 6, 7, 8],
+      "signal_type": "Sine Wave",
+      "amp_min": 0.1,
+      "amp_max": 0.8,
+      "period": 3.0,
+      "phase_offset": 0.0,
+      "fourier_terms": 7,
+      "custom_harmonics": []
+    }
+  ]
+}
+```
+
+---
+
+## Experiment Logs
+
+Every experiment produces two files in `logs/`, both sharing the same stem (`YYYYMMDD_HHMMSS`):
+
+| File | Contents |
+|---|---|
+| `flight_log_<stem>.csv` | Per-motor PWM values at 10 Hz (every 40 frames) |
+| `flight_log_<stem>.json` | Metadata sidecar — groups, duration, signal mode, start time |
+
+**Sidecar example:**
+```json
+{
+  "log_stem": "20260323_143000",
+  "experiment_start": "2026-03-23T14:30:00.123456",
+  "duration_s": 30.0,
+  "signal_mode": "Fourier (per group)",
+  "groups": [ ... ]
+}
+```
+
+The sidecar makes every log self-describing — no need to remember what parameters were used for a given run.
+
+---
+
 ## Project Structure
 
 ```
@@ -112,7 +174,7 @@ active_wind_wall/
 │   ├── plot_log.py                  # Plot logged CSV data
 │   ├── test_packet_capture.py       # Validate hardware communication
 │   └── compare_motors.py            # Compare motor response across experiments
-└── logs/                            # CSV experiment output
+└── logs/                            # CSV + JSON experiment output
 ```
 
 ---
@@ -149,13 +211,15 @@ python gui_interface.py
 ## GUI Workflow
 
 1. `python gui_interface.py`
-2. **Create groups** — click "New Group", assign motors from the 6×6 grid
-3. **Configure signals** — choose signal mode, set parameters per group (signal type, amplitude min/max, period, phase offset)
-4. **Arm motors** — click "Arm Motors"; the system sends a 20 Hz heartbeat to keep ESCs armed
-5. **Set duration** and click **Start** to begin playback; monitor live PWM in the oscilloscope panel
-6. **Mute motors live** — click any motor button during an experiment to toggle it off/on
-7. Logs saved automatically to `logs/flight_log_YYYYMMDD_HHMMSS.csv`
-8. Click **Disarm** when finished
+2. **Load a preset** (optional) — click **Load Preset** to restore a saved group configuration
+3. **Create groups** — click "New Group", assign motors from the 6×6 grid
+4. **Configure signals** — choose signal mode, set parameters per group (signal type, amplitude min/max, period, phase offset)
+5. **Save preset** (optional) — click **Save Preset** to export the current configuration for reuse
+6. **Arm motors** — click "Arm Motors"; the system sends a 20 Hz heartbeat to keep ESCs armed
+7. **Set duration** and click **Start** to begin playback; monitor live PWM in the oscilloscope panel
+8. **Mute motors live** — click any motor button during an experiment to toggle it off/on
+9. Logs saved automatically to `logs/flight_log_<stem>.csv` and `logs/flight_log_<stem>.json`
+10. Click **Disarm** when finished
 
 ## CLI Workflow
 
@@ -214,6 +278,8 @@ Motor-to-Pico assignments are configured via `PICO_MOTOR_MAP` in `config/__init_
 - **Startup seeding:** `previous_pwm` is initialised from `signal_gen.get_flow_field(0.0)`, not from `PWM_CENTER`, so there is no forced ramp at experiment start.
 - **Duration:** `duration_s` is passed directly into `flight_loop()`. The loop self-terminates when `frame_time ≥ duration_s`, independent of GUI thread timing. The GUI sets `stop_event` as a fallback.
 - **Logging:** CSV flushed every ~1 s (400 frames) and on file close. Per-frame flushing was removed as it caused multi-second stalls in the control loop on some systems.
+- **Metadata sidecar:** a JSON file is written at experiment start with the full group configuration and parameters, paired to the CSV by a shared log stem. Enables reproducibility without relying on memory or manual notes.
+- **Presets:** group configurations are serialised to JSON and can be restored in full — motor assignments, signal types, amplitude bounds, periods, and phase offsets.
 - **Hardware abstraction:** `interface.py` encodes PWM → bytes; the flight loop only calls `hardware.send_pwm()` and is protocol-agnostic (PWM today, DShot in future).
 
 ---
@@ -228,4 +294,5 @@ Motor-to-Pico assignments are configured via `PICO_MOTOR_MAP` in `config/__init_
 | Jerky motor movement | Reduce `MAX_PWM_SLEW_LIMIT` or increase `FOURIER_TERMS` |
 | High timing jitter | Close other applications; `nice -n -20 python gui_interface.py` |
 | Log has large time gaps | Ensure no other heavy I/O processes are running; hybrid sleep should prevent this |
+| Preset load fails | Ensure preset file was saved by this application; check JSON is not corrupted |
 | Import errors | Check venv is active: `source venv/bin/activate` |

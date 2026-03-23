@@ -31,6 +31,7 @@ def flight_loop(
     value_max: float | None = None,
     amp_min_per_motor: np.ndarray | None = None,
     duration_s: float | None = None,
+    log_stem: str | None = None,
     enable_logging: bool = True,
     log_interval_frames: int = 40,
     slew_limit_override: float | None = None,
@@ -107,8 +108,8 @@ def flight_loop(
         if enable_logging:
             log_dir = Path('logs')
             log_dir.mkdir(exist_ok=True)
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            csv_path = log_dir / f'flight_log_{timestamp}.csv'
+            stem = log_stem if log_stem else datetime.now().strftime('%Y%m%d_%H%M%S')
+            csv_path = log_dir / f'flight_log_{stem}.csv'
             csv_file = open(csv_path, 'w', newline='')
             
             # Create CSV header
