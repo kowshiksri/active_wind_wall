@@ -29,6 +29,8 @@ def flight_loop(
     start_time_offset: float = 0.0,
     value_min: float | None = None,
     value_max: float | None = None,
+    amp_min_per_motor: np.ndarray | None = None,
+    duration_s: float | None = None,
     enable_logging: bool = True,
     log_interval_frames: int = 40,
     slew_limit_override: float | None = None,
@@ -91,6 +93,11 @@ def flight_loop(
         else:
             raise ValueError("Provide either fourier_coeffs or signal_table to flight_loop")
         
+        # amp_min floor applied per-motor when signal > 0
+        _amp_min = (amp_min_per_motor.astype(np.float64)
+                    if amp_min_per_motor is not None
+                    else np.zeros(NUM_MOTORS, dtype=np.float64))
+
         # Attach to shared memory buffer
         shared_buffer = MotorStateBuffer(create=False)
         
@@ -117,10 +124,12 @@ def flight_loop(
         
         # State tracking — seed from signal at t=0 so there is no forced ramp from PWM_CENTER
         _init_signal = signal_gen.get_flow_field(0.0)
+        _init_pos = np.maximum(_init_signal, 0.0)
+        _init_active = PWM_MIN_RUNNING + (_amp_min + _init_pos) * (PWM_MAX - PWM_MIN_RUNNING)
         previous_pwm = np.where(
-            _init_signal <= 0.0,
+            (_init_signal <= 0.0) & (_amp_min <= 0.0),
             float(PWM_MIN),
-            PWM_MIN_RUNNING + _init_signal * (PWM_MAX - PWM_MIN_RUNNING)
+            _init_active
         )
         active_slew_limit = (slew_limit_override if slew_limit_override is not None else MAX_PWM_SLEW_LIMIT) * LOOP_TIME_MS
         frame_count = 0
@@ -136,12 +145,19 @@ def flight_loop(
             signal_raw = signal_gen.get_flow_field(frame_time)
             
             # --- Step 2: Map signal to PWM range ---
-            # signal == 0.0  →  PWM_MIN (1000 µs, arm/stopped)
-            # signal  > 0.0  →  linear from PWM_MIN_RUNNING (1200 µs) to PWM_MAX (2000 µs)
+            # Two cases:
+            #   amp_min == 0  (unassigned or user wants full stop):
+            #       signal <= 0  →  PWM_MIN (1000 µs)
+            #       signal >  0  →  linear from PWM_MIN_RUNNING to PWM_MAX
+            #   amp_min >  0  (assigned motor with speed floor):
+            #       always       →  PWM_MIN_RUNNING + (amp_min + signal) * range
+            #       floor = PWM_MIN_RUNNING + amp_min * range — no hard jump
+            _signal_pos = np.maximum(signal_raw, 0.0)
+            pwm_active = PWM_MIN_RUNNING + (_amp_min + _signal_pos) * (PWM_MAX - PWM_MIN_RUNNING)
             pwm_target = np.where(
-                signal_raw <= 0.0,
+                (signal_raw <= 0.0) & (_amp_min <= 0.0),
                 float(PWM_MIN),
-                PWM_MIN_RUNNING + signal_raw * (PWM_MAX - PWM_MIN_RUNNING)
+                pwm_active
             )
             
             # --- Step 3: Apply safety constraints ---
@@ -174,18 +190,32 @@ def flight_loop(
             if enable_logging and csv_writer and frame_count % log_interval_frames == 0:
                 timestamp = datetime.now().isoformat()
                 row = [timestamp]
-                row.extend(pwm_safe.tolist())
-                row.extend([0.0] * NUM_MOTORS)  # RPM placeholder (mock hardware)
+                row.extend(int(round(v)) for v in pwm_safe)
+                row.extend([0] * NUM_MOTORS)  # RPM placeholder (mock hardware)
                 csv_writer.writerow(row)
-                csv_file.flush()  # Ensure data is written
-            
+                # No per-frame flush — flushing every frame blocks the loop on Windows.
+                # Data is flushed every ~1 s below and on file close.
+                if frame_count % 400 == 0:
+                    csv_file.flush()
+
             # --- Step 8: Update state for next iteration ---
             previous_pwm = pwm_safe
 
-            # --- Step 9: Spinlock until exactly 2.5 ms has elapsed ---
+            # --- Step 9: Hybrid sleep + short spinlock ---
+            # Sleep for most of the remaining frame time to yield the CPU (avoids
+            # 100% CPU usage which causes Windows thermal throttling and preemption).
+            # Busy-wait only the last 0.5 ms for sub-millisecond timing accuracy.
             target_time = loop_start_time + (frame_count * LOOP_TIME_MS / 1000.0)
+            sleep_until = target_time - 0.0005  # wake 0.5 ms early
+            remaining = sleep_until - time.perf_counter()
+            if remaining > 0:
+                time.sleep(remaining)
             while time.perf_counter() < target_time:
-                pass  # Busy-wait for deterministic timing
+                pass  # short spinlock for final precision
+
+            # --- Step 10: Self-terminate when duration_s elapsed ---
+            if duration_s is not None and frame_time >= duration_s:
+                stop_event.set()
             
             # Periodic status (every 100 frames = 250 ms)
             if frame_count % 100 == 0:
