@@ -3,6 +3,7 @@
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
 #include <stdbool.h>
+#include <string.h>   // memset
 
 // ==========================================
 // CONFIGURATION
@@ -29,14 +30,20 @@ static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 
 // Frame structure
 // Total system: 36 motors across 4 Pico boards (9 motors each)
-// Each SPI frame contains 36 bytes, one per motor
+// Each SPI frame contains 72 bytes: 2 bytes per motor (12-bit word, big-endian)
+//   Byte layout per motor: [MSB (bits 11-8), LSB (bits 7-0)]
+//   Word 0x0000       = armed/stopped  → 1000 µs
+//   Word 0x0001-0x0FFF = running range → 1200-2000 µs
 #define TOTAL_MOTORS    36
-#define FRAME_BYTES     TOTAL_MOTORS
+#define FRAME_BYTES     (TOTAL_MOTORS * 2)   // 72 bytes
 
-// Calculate which bytes in the frame belong to this Pico
-// Example: PICO_ID=1 -> motors 9-17 (bytes 9-17 in frame)
-#define MY_START (PICO_ID * MOTORS_PER_PICO)
-#define MY_END   (MY_START + MOTORS_PER_PICO)
+// Calculate which bytes in the frame belong to this Pico.
+// Each motor occupies 2 bytes, so byte range = motor range × 2.
+// Example: PICO_ID=1 -> motors 9-17 -> bytes 18-35
+#define MY_START      (PICO_ID * MOTORS_PER_PICO)
+#define MY_END        (MY_START + MOTORS_PER_PICO)
+#define MY_BYTE_START (MY_START * 2)
+#define MY_BYTE_END   (MY_END   * 2)
 
 // Synchronization pulse input
 // Rising edge triggers frame latch and PWM update
@@ -51,15 +58,15 @@ uint slices[MOTORS_PER_PICO];      // PWM slice numbers
 uint channels[MOTORS_PER_PICO];    // PWM channel numbers (A or B)
 
 // Motor control buffers
-volatile uint8_t motor_values[MOTORS_PER_PICO];         // Incoming values from SPI (0-255)
-volatile uint8_t active_frame_buffer[MOTORS_PER_PICO];  // Latched values for current frame
+volatile uint8_t  rx_frame[FRAME_BYTES];                 // Raw incoming SPI bytes (72 total)
+volatile uint16_t active_frame_buffer[MOTORS_PER_PICO];  // Latched 12-bit words for current frame
 
 // Synchronization state
 volatile bool sync_pulse_detected = false;  // Set by IRQ when SYNC pin goes high
 volatile uint32_t sync_counter = 0;         // Counts SYNC pulses for LED blink
 
 // SPI frame tracking
-volatile uint8_t byte_index = 0;  // Current position in 36-byte frame (0..35)
+volatile uint8_t byte_index = 0;  // Current position in 72-byte frame (0..71)
 
 // ==========================================
 // PWM CONTROL
@@ -75,8 +82,10 @@ void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
     if (pulse_us < 1000) pulse_us = 1000;
     if (pulse_us > 2000) pulse_us = 2000;
 
-    // Convert microseconds to PWM counter level
-    uint16_t level = (uint16_t)(pulse_us * 2.34375f);
+    // Convert microseconds to PWM counter level.
+    // clkdiv=80 → PWM clock = 125 MHz / 80 = 1.5625 MHz → 1.5625 counts/µs
+    // wrap=31250 → period = 31250 / 1,562,500 Hz = 20 ms = 50 Hz ✓
+    uint16_t level = (uint16_t)(pulse_us * 1.5625f);
     if (level > 31250) level = 31250;
 
     // Update PWM hardware
@@ -91,7 +100,7 @@ void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
  * SYNC pin interrupt handler
  * 
  * Called on rising edge of SYNC signal from Raspberry Pi.
- * Signals that a complete 36-byte frame has been transmitted
+ * Signals that a complete 72-byte frame has been transmitted
  * and PWM values should be updated atomically.
  * 
  * Also blinks LED every 20 SYNC pulses to indicate activity.
@@ -127,12 +136,14 @@ int main() {
         slices[i] = pwm_gpio_to_slice_num(MOTOR_PINS[i]);
         channels[i] = pwm_gpio_to_channel(MOTOR_PINS[i]);
 
-        pwm_set_clkdiv(slices[i], 64.0f);
+        // clkdiv=80 → 125 MHz / 80 = 1.5625 MHz PWM clock
+        // wrap=31250 → 1,562,500 / 31250 = 50 Hz (20 ms period) ✓
+        pwm_set_clkdiv(slices[i], 80.0f);
         pwm_set_wrap(slices[i], 31250);
         pwm_set_enabled(slices[i], true);
 
         // Initialize motor buffers to zero
-        motor_values[i] = 0;
+        motor_values[i]      = 0;
         active_frame_buffer[i] = 0;
         
         // Boot with PWM off — no pulse until GUI arms the system
@@ -166,22 +177,15 @@ int main() {
     while (true) {
         
         // === Step A: Receive SPI data ===
-        // Read bytes as they arrive over SPI
-        // Each byte represents one motor value (0-255) in the 36-motor array
+        // Read bytes as they arrive. Frame is 72 bytes: 2 bytes per motor (big-endian).
+        // All bytes are stored in rx_frame[]; reconstruction happens on SYNC.
         while (spi_is_readable(SPI_INST)) {
             uint8_t rx = (uint8_t)spi_get_hw(SPI_INST)->dr;
-
-            uint8_t idx = byte_index;
             if (byte_index < FRAME_BYTES) {
+                rx_frame[byte_index] = rx;
                 byte_index++;
-            } else {
-                // Extra bytes beyond 36 are ignored until next SYNC
             }
-
-            // Store only bytes that belong to this Pico's motors
-            if (idx >= MY_START && idx < MY_END) {
-                motor_values[idx - MY_START] = rx;
-            }
+            // Extra bytes beyond 72 are ignored until next SYNC
         }
 
         // === Step B: Process SYNC pulse ===
@@ -190,33 +194,39 @@ int main() {
             sync_pulse_detected = false;
             last_sync_time = get_absolute_time();
 
-            // Atomic snapshot: copy latest SPI values to active buffer
+            // Reconstruct 12-bit words for this Pico's motors and latch atomically.
+            // Each motor occupies 2 bytes in rx_frame at offset MY_BYTE_START + i*2.
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                active_frame_buffer[i] = motor_values[i];
+                uint8_t msb = rx_frame[MY_BYTE_START + i * 2];
+                uint8_t lsb = rx_frame[MY_BYTE_START + i * 2 + 1];
+                active_frame_buffer[i] = ((uint16_t)msb << 8) | lsb;
             }
 
-            // Convert motor values (0-255) to PWM pulse widths and update hardware
+            // Convert 12-bit words (0–4095) to PWM pulse widths and update hardware.
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                uint8_t raw_val = active_frame_buffer[i];
+                uint16_t word = active_frame_buffer[i];
 
                 uint16_t target_pwm;
-                if (raw_val == 0) {
-                    // 0 = explicit idle/stop command
+                if (word == 0) {
+                    // 0x0000 = armed/stopped
                     target_pwm = 1000;
                 } else {
-                    // Map 1-255 to 1200-2000 us (linear scaling)
-                    // 1200 us = minimum active, 2000 us = maximum
-                    target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
+                    // Map 0x0001–0x0FFF (1–4095) → 1200–2000 µs
+                    // Resolution: 800 µs / 4094 steps ≈ 0.195 µs/step
+                    target_pwm = 1200 + ((uint32_t)(word - 1) * 800) / 4094;
                 }
-                
+
                 // Safety clamp
                 if (target_pwm > 2000) target_pwm = 2000;
-                
+
                 set_motor_pwm_us(i, target_pwm);
             }
 
-            // Reset frame byte counter for next transmission cycle
+            // Reset frame for next cycle.
+            // Clear the buffer so any truncated/short frame results in 0x0000
+            // (armed/stopped) for missing motors rather than stale values.
             byte_index = 0;
+            memset((void*)rx_frame, 0, FRAME_BYTES);
         }
 
         // === Step C: Safety watchdog ===

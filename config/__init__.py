@@ -112,9 +112,13 @@ def _build_motor_pico_lookup() -> dict:
 MOTOR_TO_PICO_LOOKUP: dict = _build_motor_pico_lookup()
 
 # SPI Configuration
-SPI_BUS: int = 0           # SPI bus number (0 for default)
-SPI_DEVICE: int = 0        # SPI device number (0 for default)
+SPI_BUS: int = 0             # SPI bus number (0 for default)
+SPI_DEVICE: int = 0          # SPI device number (0 for default)
 SPI_SPEED_HZ: int = 1000000  # 1 MHz SPI speed
+# Frame encoding: 12-bit per motor (2 bytes big-endian), 36 motors = 72 bytes/frame
+# At 1 MHz: 72 × 8 bits = 576 µs transfer time (well within 2500 µs @ 400 Hz)
+SPI_BITS_PER_MOTOR: int = 12
+SPI_FRAME_BYTES: int = NUM_MOTORS * 2  # 72 bytes
 
 # GPIO Sync Pin Configuration
 SYNC_PIN: int = 17         # GPIO pin for synchronization trigger

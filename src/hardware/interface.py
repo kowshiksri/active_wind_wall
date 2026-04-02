@@ -67,9 +67,8 @@ class RealSPI:
         print("[SPI] Initialized SPI0 (GPIO10=MOSI, GPIO11=SCLK)")
     
     def write_bytes(self, data: List[int]) -> None:
-        """Send bytes via SPI. Each byte triggers CS toggle for Pico sync."""
-        for b in data:
-            self.spi.xfer2([int(b) & 0xFF])
+        """Send full frame as one SPI burst (CS held for entire transfer)."""
+        self.spi.xfer2([int(b) & 0xFF for b in data])
 
     def close(self) -> None:
         self.spi.close()
@@ -172,23 +171,25 @@ class HardwareInterface:
         # 1. Reorder motors to match physical wiring configuration
         reordered_pwm = np.array([pwm_values[i] for i in PHYSICAL_MOTOR_ORDER])
         
-        # 2. Convert PWM values to byte values (0-255)
-        #    0       → PWM_MIN (armed/stopped)
-        #    1–255   → PWM_MIN_RUNNING to PWM_MAX (spinning range)
+        # 2. Convert PWM values to 12-bit words (0–4095), packed as 2 bytes big-endian.
+        #    0x0000        → PWM_MIN (armed/stopped)
+        #    0x0001–0x0FFF → PWM_MIN_RUNNING to PWM_MAX (spinning range)
+        #    Resolution: 800 µs / 4094 steps ≈ 0.195 µs/step (vs 3.14 µs/step at 8-bit)
         _range = PWM_MAX - PWM_MIN_RUNNING
         packet = []
         for pwm in reordered_pwm:
             if pwm < PWM_MIN_RUNNING:
-                byte_val = 0x00
+                word = 0x0000
             else:
                 clipped = max(PWM_MIN_RUNNING, min(PWM_MAX, pwm))
-                byte_val = 1 + int((clipped - PWM_MIN_RUNNING) * 254 / _range)
-                byte_val = max(1, min(255, byte_val))
-            packet.append(byte_val)
+                word = 1 + int((clipped - PWM_MIN_RUNNING) * 4094 / _range)
+                word = max(1, min(4095, word))
+            packet.append((word >> 8) & 0xFF)   # MSB
+            packet.append(word & 0xFF)           # LSB
 
-        # 3. Send via SPI then trigger Sync atomically
-        # Both are in one try block: if SPI fails, Sync is NOT triggered
-        # (sending a sync pulse after a partial/failed frame would latch bad data)
+        # 3. Send 72-byte frame as ONE burst, then trigger SYNC atomically.
+        # Single xfer2 keeps CS asserted for the full frame — no mid-frame gaps.
+        # If SPI fails, SYNC is NOT triggered (avoids latching a partial frame).
         try:
             self.spi.write_bytes(packet)
             self.gpio.toggle_sync_pin()
