@@ -142,8 +142,7 @@ int main() {
         pwm_set_wrap(slices[i], 31250);
         pwm_set_enabled(slices[i], true);
 
-        // Initialize motor buffers to zero
-        motor_values[i]      = 0;
+        // Initialize motor buffer to zero
         active_frame_buffer[i] = 0;
         
         // Boot with PWM off — no pulse until GUI arms the system
