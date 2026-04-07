@@ -75,9 +75,9 @@ void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
     if (pulse_us < 1000) pulse_us = 1000;
     if (pulse_us > 2000) pulse_us = 2000;
 
-    // Convert microseconds to PWM counter level
-    uint16_t level = (uint16_t)(pulse_us * 2.34375f);
-    if (level > 31250) level = 31250;
+    // 1 tick = 1 µs, so level = pulse_us directly
+    uint16_t level = pulse_us;
+    if (level > 20000) level = 20000;
 
     // Update PWM hardware
     pwm_set_chan_level(slices[motor_index], channels[motor_index], level);
@@ -121,23 +121,33 @@ int main() {
     gpio_put(LED_PIN, 1);
 
     // Initialize PWM for all motors
+    // Phase 1: configure every slice/channel — do NOT enable yet.
+    // GPIO pairs share a slice (0+1→slice0, 2+3→slice1, etc.).
+    // Calling pwm_set_clkdiv/wrap on an already-running slice causes a glitch,
+    // so we configure everything first, then start all slices atomically below.
+    uint32_t slice_mask = 0;
     for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-        // Configure GPIO for PWM output
         gpio_set_function(MOTOR_PINS[i], GPIO_FUNC_PWM);
         slices[i] = pwm_gpio_to_slice_num(MOTOR_PINS[i]);
         channels[i] = pwm_gpio_to_channel(MOTOR_PINS[i]);
 
-        pwm_set_clkdiv(slices[i], 64.0f);
-        pwm_set_wrap(slices[i], 31250);
-        pwm_set_enabled(slices[i], true);
+        // Only configure each slice once (skip if already seen via its pair pin)
+        if (!(slice_mask & (1u << slices[i]))) {
+            pwm_set_clkdiv(slices[i], 125.0f);  // 125 MHz / 125 = 1 MHz = 1 µs per tick
+            pwm_set_wrap(slices[i], 20000);      // 20000 ticks × 1 µs = 20 ms = 50 Hz
+        }
+        slice_mask |= (1u << slices[i]);
 
         // Initialize motor buffers to zero
         motor_values[i] = 0;
         active_frame_buffer[i] = 0;
-        
-        // Boot with PWM off — no pulse until GUI arms the system
-        set_motor_pwm_us(i, 0);
+
+        // Set initial level — no pulse until GUI arms the system
+        pwm_set_chan_level(slices[i], channels[i], 0);
     }
+
+    // Phase 2: enable all slices simultaneously — clean, glitch-free start
+    pwm_set_mask_enabled(slice_mask);
 
     // Configure SPI in slave mode
     // Baud rate parameter is ignored in slave mode (clock provided by master)

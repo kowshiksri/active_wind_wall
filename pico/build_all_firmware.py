@@ -156,7 +156,7 @@ def build_firmware(pico_id, step_num, total_steps):
     # Step 4: Run CMake
     print(f"    Running CMake configuration...")
     cmake_result = subprocess.run(
-        ["cmake", ".."],
+        ["cmake", "-G", "Ninja", ".."],
         cwd=build_dir,
         capture_output=True,
         text=True
@@ -168,10 +168,10 @@ def build_firmware(pico_id, step_num, total_steps):
         print(cmake_result.stderr)
         return False
     
-    # Step 5: Run Make
+    # Step 5: Build with Ninja
     print(f"    Compiling firmware (this may take a minute)...")
     make_result = subprocess.run(
-        ["make", "-j4"],
+        ["cmake", "--build", ".", "--parallel", "4"],
         cwd=build_dir,
         capture_output=True,
         text=True
