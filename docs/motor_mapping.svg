@@ -1,0 +1,501 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1122 793" width="1122" height="793">
+  <defs>
+    <style>
+      text { font-family: 'Helvetica Neue', Arial, sans-serif; }
+      .title { font-size: 24px; font-weight: 700; fill: #1a1a2e; }
+      .subtitle { font-size: 13px; font-weight: 600; fill: #4a4a6a; }
+      .section-title { font-size: 14px; font-weight: 700; fill: #1a1a2e; }
+      .grid-id { font-size: 18px; font-weight: 700; }
+      .grid-sub { font-size: 9px; fill: #444; font-weight: 600; }
+      .grid-byte { font-size: 8px; fill: #777; font-weight: 600; }
+      .pico-title { font-size: 11px; font-weight: 700; fill: #fff; }
+      .tbl-th { font-size: 10px; font-weight: 700; fill: #fff; text-anchor: middle; }
+      .tbl-td { font-size: 11px; font-weight: 700; fill: #2d2d44; text-anchor: middle; }
+      .tbl-sm { font-size: 9px; fill: #666; text-anchor: middle; }
+      .tbl-label { font-size: 9px; fill: #555; font-weight: 700; text-anchor: start; }
+      .note-text { font-size: 10.5px; fill: #333; }
+      .note-bold { font-size: 10.5px; fill: #333; font-weight: 700; }
+      .footer-text { font-size: 9px; fill: #999; }
+      .legend-label { font-size: 11px; font-weight: 600; fill: #2d2d44; }
+      .row-label { font-size: 10px; fill: #555; font-weight: 600; text-anchor: end; }
+      .col-label { font-size: 10px; fill: #555; font-weight: 600; text-anchor: middle; }
+    </style>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1122" height="793" fill="#fafafa"/>
+  <rect x="16" y="16" width="1090" height="761" fill="none" stroke="#ccc" stroke-width="1.5" rx="8"/>
+
+  <!-- ============ HEADER ============ -->
+  <text x="561" y="50" text-anchor="middle" class="title">ACTIVE WIND WALL — MOTOR MAPPING</text>
+  <text x="561" y="68" text-anchor="middle" class="subtitle">6×6 Grid Layout · Per-Pico GPIO Assignments · Page 2 of 2</text>
+  <line x1="40" y1="78" x2="1082" y2="78" stroke="#ddd" stroke-width="1"/>
+
+  <!-- ============ LEFT: 6x6 MOTOR GRID ============ -->
+  <text x="50" y="100" class="section-title">MOTOR GRID — FRONT VIEW (facing the wall)</text>
+
+  <!-- Color legend - placed BELOW section title, not overlapping -->
+  <text x="50" y="118" font-size="10" fill="#555" font-weight="600">Legend:</text>
+  <rect x="95" y="108" width="14" height="14" rx="3" fill="#2980b9"/>
+  <text x="113" y="119" class="legend-label">Pico 0</text>
+  <rect x="170" y="108" width="14" height="14" rx="3" fill="#27ae60"/>
+  <text x="188" y="119" class="legend-label">Pico 1</text>
+  <rect x="245" y="108" width="14" height="14" rx="3" fill="#e67e22"/>
+  <text x="263" y="119" class="legend-label">Pico 2</text>
+  <rect x="320" y="108" width="14" height="14" rx="3" fill="#c0392b"/>
+  <text x="338" y="119" class="legend-label">Pico 3</text>
+
+  <!-- Grid: 72x65 cells, starting at x=82, y=140 -->
+  <!-- Row labels -->
+  <text x="72" y="178" class="row-label">Row 0</text>
+  <text x="72" y="243" class="row-label">Row 1</text>
+  <text x="72" y="308" class="row-label">Row 2</text>
+  <text x="72" y="373" class="row-label">Row 3</text>
+  <text x="72" y="438" class="row-label">Row 4</text>
+  <text x="72" y="503" class="row-label">Row 5</text>
+
+  <!-- Column labels -->
+  <text x="118" y="137" class="col-label">Col 0</text>
+  <text x="190" y="137" class="col-label">Col 1</text>
+  <text x="262" y="137" class="col-label">Col 2</text>
+  <text x="334" y="137" class="col-label">Col 3</text>
+  <text x="406" y="137" class="col-label">Col 4</text>
+  <text x="478" y="137" class="col-label">Col 5</text>
+
+  <!-- ===== ROW 0 ===== -->
+  <!-- Motor 0 - Pico 0 (blue) -->
+  <rect x="82" y="145" width="72" height="65" rx="4" fill="#d4e6f1" stroke="#2980b9" stroke-width="2"/>
+  <text x="118" y="170" text-anchor="middle" class="grid-id" fill="#2980b9">0</text>
+  <text x="118" y="183" text-anchor="middle" class="grid-sub">P0 · GP0</text>
+  <text x="118" y="195" text-anchor="middle" class="grid-byte">byte 0</text>
+
+  <!-- Motor 1 -->
+  <rect x="154" y="145" width="72" height="65" rx="4" fill="#d4e6f1" stroke="#2980b9" stroke-width="2"/>
+  <text x="190" y="170" text-anchor="middle" class="grid-id" fill="#2980b9">1</text>
+  <text x="190" y="183" text-anchor="middle" class="grid-sub">P0 · GP1</text>
+  <text x="190" y="195" text-anchor="middle" class="grid-byte">byte 1</text>
+
+  <!-- Motor 2 -->
+  <rect x="226" y="145" width="72" height="65" rx="4" fill="#d4e6f1" stroke="#2980b9" stroke-width="2"/>
+  <text x="262" y="170" text-anchor="middle" class="grid-id" fill="#2980b9">2</text>
+  <text x="262" y="183" text-anchor="middle" class="grid-sub">P0 · GP2</text>
+  <text x="262" y="195" text-anchor="middle" class="grid-byte">byte 2</text>
+
+  <!-- Motor 3 - Pico 2 (orange) -->
+  <rect x="298" y="145" width="72" height="65" rx="4" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+  <text x="334" y="170" text-anchor="middle" class="grid-id" fill="#e67e22">3</text>
+  <text x="334" y="183" text-anchor="middle" class="grid-sub">P2 · GP0</text>
+  <text x="334" y="195" text-anchor="middle" class="grid-byte">byte 18</text>
+
+  <!-- Motor 4 -->
+  <rect x="370" y="145" width="72" height="65" rx="4" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+  <text x="406" y="170" text-anchor="middle" class="grid-id" fill="#e67e22">4</text>
+  <text x="406" y="183" text-anchor="middle" class="grid-sub">P2 · GP1</text>
+  <text x="406" y="195" text-anchor="middle" class="grid-byte">byte 19</text>
+
+  <!-- Motor 5 -->
+  <rect x="442" y="145" width="72" height="65" rx="4" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+  <text x="478" y="170" text-anchor="middle" class="grid-id" fill="#e67e22">5</text>
+  <text x="478" y="183" text-anchor="middle" class="grid-sub">P2 · GP2</text>
+  <text x="478" y="195" text-anchor="middle" class="grid-byte">byte 20</text>
+
+  <!-- ===== ROW 1 ===== -->
+  <!-- Motor 6 - Pico 0 -->
+  <rect x="82" y="210" width="72" height="65" rx="4" fill="#d4e6f1" stroke="#2980b9" stroke-width="2"/>
+  <text x="118" y="235" text-anchor="middle" class="grid-id" fill="#2980b9">6</text>
+  <text x="118" y="248" text-anchor="middle" class="grid-sub">P0 · GP3</text>
+  <text x="118" y="260" text-anchor="middle" class="grid-byte">byte 3</text>
+
+  <!-- Motor 7 -->
+  <rect x="154" y="210" width="72" height="65" rx="4" fill="#d4e6f1" stroke="#2980b9" stroke-width="2"/>
+  <text x="190" y="235" text-anchor="middle" class="grid-id" fill="#2980b9">7</text>
+  <text x="190" y="248" text-anchor="middle" class="grid-sub">P0 · GP4</text>
+  <text x="190" y="260" text-anchor="middle" class="grid-byte">byte 4</text>
+
+  <!-- Motor 8 -->
+  <rect x="226" y="210" width="72" height="65" rx="4" fill="#d4e6f1" stroke="#2980b9" stroke-width="2"/>
+  <text x="262" y="235" text-anchor="middle" class="grid-id" fill="#2980b9">8</text>
+  <text x="262" y="248" text-anchor="middle" class="grid-sub">P0 · GP5</text>
+  <text x="262" y="260" text-anchor="middle" class="grid-byte">byte 5</text>
+
+  <!-- Motor 9 - Pico 2 -->
+  <rect x="298" y="210" width="72" height="65" rx="4" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+  <text x="334" y="235" text-anchor="middle" class="grid-id" fill="#e67e22">9</text>
+  <text x="334" y="248" text-anchor="middle" class="grid-sub">P2 · GP3</text>
+  <text x="334" y="260" text-anchor="middle" class="grid-byte">byte 21</text>
+
+  <!-- Motor 10 -->
+  <rect x="370" y="210" width="72" height="65" rx="4" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+  <text x="406" y="235" text-anchor="middle" class="grid-id" fill="#e67e22">10</text>
+  <text x="406" y="248" text-anchor="middle" class="grid-sub">P2 · GP4</text>
+  <text x="406" y="260" text-anchor="middle" class="grid-byte">byte 22</text>
+
+  <!-- Motor 11 -->
+  <rect x="442" y="210" width="72" height="65" rx="4" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+  <text x="478" y="235" text-anchor="middle" class="grid-id" fill="#e67e22">11</text>
+  <text x="478" y="248" text-anchor="middle" class="grid-sub">P2 · GP5</text>
+  <text x="478" y="260" text-anchor="middle" class="grid-byte">byte 23</text>
+
+  <!-- ===== ROW 2 ===== -->
+  <!-- Motor 12 - Pico 0 -->
+  <rect x="82" y="275" width="72" height="65" rx="4" fill="#d4e6f1" stroke="#2980b9" stroke-width="2"/>
+  <text x="118" y="300" text-anchor="middle" class="grid-id" fill="#2980b9">12</text>
+  <text x="118" y="313" text-anchor="middle" class="grid-sub">P0 · GP6</text>
+  <text x="118" y="325" text-anchor="middle" class="grid-byte">byte 6</text>
+
+  <!-- Motor 13 -->
+  <rect x="154" y="275" width="72" height="65" rx="4" fill="#d4e6f1" stroke="#2980b9" stroke-width="2"/>
+  <text x="190" y="300" text-anchor="middle" class="grid-id" fill="#2980b9">13</text>
+  <text x="190" y="313" text-anchor="middle" class="grid-sub">P0 · GP7</text>
+  <text x="190" y="325" text-anchor="middle" class="grid-byte">byte 7</text>
+
+  <!-- Motor 14 -->
+  <rect x="226" y="275" width="72" height="65" rx="4" fill="#d4e6f1" stroke="#2980b9" stroke-width="2"/>
+  <text x="262" y="300" text-anchor="middle" class="grid-id" fill="#2980b9">14</text>
+  <text x="262" y="313" text-anchor="middle" class="grid-sub">P0 · GP8</text>
+  <text x="262" y="325" text-anchor="middle" class="grid-byte">byte 8</text>
+
+  <!-- Motor 15 - Pico 2 -->
+  <rect x="298" y="275" width="72" height="65" rx="4" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+  <text x="334" y="300" text-anchor="middle" class="grid-id" fill="#e67e22">15</text>
+  <text x="334" y="313" text-anchor="middle" class="grid-sub">P2 · GP6</text>
+  <text x="334" y="325" text-anchor="middle" class="grid-byte">byte 24</text>
+
+  <!-- Motor 16 -->
+  <rect x="370" y="275" width="72" height="65" rx="4" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+  <text x="406" y="300" text-anchor="middle" class="grid-id" fill="#e67e22">16</text>
+  <text x="406" y="313" text-anchor="middle" class="grid-sub">P2 · GP7</text>
+  <text x="406" y="325" text-anchor="middle" class="grid-byte">byte 25</text>
+
+  <!-- Motor 17 -->
+  <rect x="442" y="275" width="72" height="65" rx="4" fill="#fdebd0" stroke="#e67e22" stroke-width="2"/>
+  <text x="478" y="300" text-anchor="middle" class="grid-id" fill="#e67e22">17</text>
+  <text x="478" y="313" text-anchor="middle" class="grid-sub">P2 · GP8</text>
+  <text x="478" y="325" text-anchor="middle" class="grid-byte">byte 26</text>
+
+  <!-- ===== ROW 3 ===== -->
+  <!-- Motor 18 - Pico 1 (green) -->
+  <rect x="82" y="340" width="72" height="65" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="118" y="365" text-anchor="middle" class="grid-id" fill="#27ae60">18</text>
+  <text x="118" y="378" text-anchor="middle" class="grid-sub">P1 · GP0</text>
+  <text x="118" y="390" text-anchor="middle" class="grid-byte">byte 9</text>
+
+  <!-- Motor 19 -->
+  <rect x="154" y="340" width="72" height="65" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="190" y="365" text-anchor="middle" class="grid-id" fill="#27ae60">19</text>
+  <text x="190" y="378" text-anchor="middle" class="grid-sub">P1 · GP1</text>
+  <text x="190" y="390" text-anchor="middle" class="grid-byte">byte 10</text>
+
+  <!-- Motor 20 -->
+  <rect x="226" y="340" width="72" height="65" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="262" y="365" text-anchor="middle" class="grid-id" fill="#27ae60">20</text>
+  <text x="262" y="378" text-anchor="middle" class="grid-sub">P1 · GP2</text>
+  <text x="262" y="390" text-anchor="middle" class="grid-byte">byte 11</text>
+
+  <!-- Motor 21 - Pico 3 (red) -->
+  <rect x="298" y="340" width="72" height="65" rx="4" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+  <text x="334" y="365" text-anchor="middle" class="grid-id" fill="#c0392b">21</text>
+  <text x="334" y="378" text-anchor="middle" class="grid-sub">P3 · GP0</text>
+  <text x="334" y="390" text-anchor="middle" class="grid-byte">byte 27</text>
+
+  <!-- Motor 22 -->
+  <rect x="370" y="340" width="72" height="65" rx="4" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+  <text x="406" y="365" text-anchor="middle" class="grid-id" fill="#c0392b">22</text>
+  <text x="406" y="378" text-anchor="middle" class="grid-sub">P3 · GP1</text>
+  <text x="406" y="390" text-anchor="middle" class="grid-byte">byte 28</text>
+
+  <!-- Motor 23 -->
+  <rect x="442" y="340" width="72" height="65" rx="4" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+  <text x="478" y="365" text-anchor="middle" class="grid-id" fill="#c0392b">23</text>
+  <text x="478" y="378" text-anchor="middle" class="grid-sub">P3 · GP2</text>
+  <text x="478" y="390" text-anchor="middle" class="grid-byte">byte 29</text>
+
+  <!-- ===== ROW 4 ===== -->
+  <!-- Motor 24 - Pico 1 -->
+  <rect x="82" y="405" width="72" height="65" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="118" y="430" text-anchor="middle" class="grid-id" fill="#27ae60">24</text>
+  <text x="118" y="443" text-anchor="middle" class="grid-sub">P1 · GP3</text>
+  <text x="118" y="455" text-anchor="middle" class="grid-byte">byte 12</text>
+
+  <!-- Motor 25 -->
+  <rect x="154" y="405" width="72" height="65" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="190" y="430" text-anchor="middle" class="grid-id" fill="#27ae60">25</text>
+  <text x="190" y="443" text-anchor="middle" class="grid-sub">P1 · GP4</text>
+  <text x="190" y="455" text-anchor="middle" class="grid-byte">byte 13</text>
+
+  <!-- Motor 26 -->
+  <rect x="226" y="405" width="72" height="65" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="262" y="430" text-anchor="middle" class="grid-id" fill="#27ae60">26</text>
+  <text x="262" y="443" text-anchor="middle" class="grid-sub">P1 · GP5</text>
+  <text x="262" y="455" text-anchor="middle" class="grid-byte">byte 14</text>
+
+  <!-- Motor 27 - Pico 3 -->
+  <rect x="298" y="405" width="72" height="65" rx="4" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+  <text x="334" y="430" text-anchor="middle" class="grid-id" fill="#c0392b">27</text>
+  <text x="334" y="443" text-anchor="middle" class="grid-sub">P3 · GP3</text>
+  <text x="334" y="455" text-anchor="middle" class="grid-byte">byte 30</text>
+
+  <!-- Motor 28 -->
+  <rect x="370" y="405" width="72" height="65" rx="4" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+  <text x="406" y="430" text-anchor="middle" class="grid-id" fill="#c0392b">28</text>
+  <text x="406" y="443" text-anchor="middle" class="grid-sub">P3 · GP4</text>
+  <text x="406" y="455" text-anchor="middle" class="grid-byte">byte 31</text>
+
+  <!-- Motor 29 -->
+  <rect x="442" y="405" width="72" height="65" rx="4" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+  <text x="478" y="430" text-anchor="middle" class="grid-id" fill="#c0392b">29</text>
+  <text x="478" y="443" text-anchor="middle" class="grid-sub">P3 · GP5</text>
+  <text x="478" y="455" text-anchor="middle" class="grid-byte">byte 32</text>
+
+  <!-- ===== ROW 5 ===== -->
+  <!-- Motor 30 - Pico 1 -->
+  <rect x="82" y="470" width="72" height="65" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="118" y="495" text-anchor="middle" class="grid-id" fill="#27ae60">30</text>
+  <text x="118" y="508" text-anchor="middle" class="grid-sub">P1 · GP6</text>
+  <text x="118" y="520" text-anchor="middle" class="grid-byte">byte 15</text>
+
+  <!-- Motor 31 -->
+  <rect x="154" y="470" width="72" height="65" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="190" y="495" text-anchor="middle" class="grid-id" fill="#27ae60">31</text>
+  <text x="190" y="508" text-anchor="middle" class="grid-sub">P1 · GP7</text>
+  <text x="190" y="520" text-anchor="middle" class="grid-byte">byte 16</text>
+
+  <!-- Motor 32 -->
+  <rect x="226" y="470" width="72" height="65" rx="4" fill="#d5f5e3" stroke="#27ae60" stroke-width="2"/>
+  <text x="262" y="495" text-anchor="middle" class="grid-id" fill="#27ae60">32</text>
+  <text x="262" y="508" text-anchor="middle" class="grid-sub">P1 · GP8</text>
+  <text x="262" y="520" text-anchor="middle" class="grid-byte">byte 17</text>
+
+  <!-- Motor 33 - Pico 3 -->
+  <rect x="298" y="470" width="72" height="65" rx="4" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+  <text x="334" y="495" text-anchor="middle" class="grid-id" fill="#c0392b">33</text>
+  <text x="334" y="508" text-anchor="middle" class="grid-sub">P3 · GP6</text>
+  <text x="334" y="520" text-anchor="middle" class="grid-byte">byte 33</text>
+
+  <!-- Motor 34 -->
+  <rect x="370" y="470" width="72" height="65" rx="4" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+  <text x="406" y="495" text-anchor="middle" class="grid-id" fill="#c0392b">34</text>
+  <text x="406" y="508" text-anchor="middle" class="grid-sub">P3 · GP7</text>
+  <text x="406" y="520" text-anchor="middle" class="grid-byte">byte 34</text>
+
+  <!-- Motor 35 -->
+  <rect x="442" y="470" width="72" height="65" rx="4" fill="#fadbd8" stroke="#c0392b" stroke-width="2"/>
+  <text x="478" y="495" text-anchor="middle" class="grid-id" fill="#c0392b">35</text>
+  <text x="478" y="508" text-anchor="middle" class="grid-sub">P3 · GP8</text>
+  <text x="478" y="520" text-anchor="middle" class="grid-byte">byte 35</text>
+
+  <!-- Quadrant divider lines -->
+  <line x1="298" y1="145" x2="298" y2="535" stroke="#333" stroke-width="2.5" stroke-dasharray="6,4"/>
+  <line x1="82" y1="340" x2="514" y2="340" stroke="#333" stroke-width="2.5" stroke-dasharray="6,4"/>
+
+  <!-- Quadrant labels below grid -->
+  <text x="190" y="552" text-anchor="middle" font-size="10" fill="#2980b9" font-weight="700">TOP-LEFT: Pico 0</text>
+  <text x="406" y="552" text-anchor="middle" font-size="10" fill="#e67e22" font-weight="700">TOP-RIGHT: Pico 2</text>
+  <text x="190" y="566" text-anchor="middle" font-size="10" fill="#27ae60" font-weight="700">BTM-LEFT: Pico 1</text>
+  <text x="406" y="566" text-anchor="middle" font-size="10" fill="#c0392b" font-weight="700">BTM-RIGHT: Pico 3</text>
+
+  <!-- Cell reading guide -->
+  <rect x="82" y="580" width="432" height="50" rx="4" fill="#f5f5f5" stroke="#ddd" stroke-width="1"/>
+  <text x="97" y="598" class="note-bold">How to read each cell:</text>
+  <text x="97" y="614" class="note-text">Large # = Motor ID · P0 = Pico 0 · GP3 = GPIO pin 3 · byte N = SPI frame position</text>
+
+  <!-- ============ RIGHT: PER-PICO TABLES ============ -->
+  <!-- Label col: x=548..620, Data cols start at x=648, spacing=46 -->
+
+  <text x="540" y="100" class="section-title">PER-PICO GPIO → MOTOR LOOKUP</text>
+
+  <!-- ===== PICO 0 TABLE ===== -->
+  <rect x="540" y="112" width="530" height="22" rx="5" fill="#2980b9"/>
+  <text x="805" y="128" text-anchor="middle" class="pico-title">PICO 0 — PICO_ID=0 — SPI bytes 0–8 — Top-Left Quadrant</text>
+
+  <rect x="540" y="134" width="530" height="20" fill="#3a9fd5"/>
+  <text x="570" y="148" class="tbl-label" fill="#fff">GPIO Pin</text>
+  <text x="648" y="148" class="tbl-th">0</text>
+  <text x="694" y="148" class="tbl-th">1</text>
+  <text x="740" y="148" class="tbl-th">2</text>
+  <text x="786" y="148" class="tbl-th">3</text>
+  <text x="832" y="148" class="tbl-th">4</text>
+  <text x="878" y="148" class="tbl-th">5</text>
+  <text x="924" y="148" class="tbl-th">6</text>
+  <text x="970" y="148" class="tbl-th">7</text>
+  <text x="1016" y="148" class="tbl-th">8</text>
+
+  <rect x="540" y="154" width="530" height="22" fill="#d4e6f1"/>
+  <text x="570" y="169" class="tbl-label">Motor ID</text>
+  <text x="648" y="170" class="tbl-td">0</text>
+  <text x="694" y="170" class="tbl-td">1</text>
+  <text x="740" y="170" class="tbl-td">2</text>
+  <text x="786" y="170" class="tbl-td">6</text>
+  <text x="832" y="170" class="tbl-td">7</text>
+  <text x="878" y="170" class="tbl-td">8</text>
+  <text x="924" y="170" class="tbl-td">12</text>
+  <text x="970" y="170" class="tbl-td">13</text>
+  <text x="1016" y="170" class="tbl-td">14</text>
+
+  <rect x="540" y="176" width="530" height="20" fill="#eaf2f8"/>
+  <text x="570" y="190" class="tbl-label">Grid Pos</text>
+  <text x="648" y="189" class="tbl-sm">R0C0</text>
+  <text x="694" y="189" class="tbl-sm">R0C1</text>
+  <text x="740" y="189" class="tbl-sm">R0C2</text>
+  <text x="786" y="189" class="tbl-sm">R1C0</text>
+  <text x="832" y="189" class="tbl-sm">R1C1</text>
+  <text x="878" y="189" class="tbl-sm">R1C2</text>
+  <text x="924" y="189" class="tbl-sm">R2C0</text>
+  <text x="970" y="189" class="tbl-sm">R2C1</text>
+  <text x="1016" y="189" class="tbl-sm">R2C2</text>
+
+  <rect x="540" y="112" width="530" height="85" rx="5" fill="none" stroke="#2980b9" stroke-width="1.5"/>
+
+  <!-- ===== PICO 1 TABLE ===== -->
+  <rect x="540" y="212" width="530" height="22" rx="5" fill="#27ae60"/>
+  <text x="805" y="228" text-anchor="middle" class="pico-title">PICO 1 — PICO_ID=1 — SPI bytes 9–17 — Bottom-Left Quadrant</text>
+
+  <rect x="540" y="234" width="530" height="20" fill="#2ecc71"/>
+  <text x="570" y="248" class="tbl-label" fill="#fff">GPIO Pin</text>
+  <text x="648" y="248" class="tbl-th">0</text>
+  <text x="694" y="248" class="tbl-th">1</text>
+  <text x="740" y="248" class="tbl-th">2</text>
+  <text x="786" y="248" class="tbl-th">3</text>
+  <text x="832" y="248" class="tbl-th">4</text>
+  <text x="878" y="248" class="tbl-th">5</text>
+  <text x="924" y="248" class="tbl-th">6</text>
+  <text x="970" y="248" class="tbl-th">7</text>
+  <text x="1016" y="248" class="tbl-th">8</text>
+
+  <rect x="540" y="254" width="530" height="22" fill="#d5f5e3"/>
+  <text x="570" y="269" class="tbl-label">Motor ID</text>
+  <text x="648" y="270" class="tbl-td">18</text>
+  <text x="694" y="270" class="tbl-td">19</text>
+  <text x="740" y="270" class="tbl-td">20</text>
+  <text x="786" y="270" class="tbl-td">24</text>
+  <text x="832" y="270" class="tbl-td">25</text>
+  <text x="878" y="270" class="tbl-td">26</text>
+  <text x="924" y="270" class="tbl-td">30</text>
+  <text x="970" y="270" class="tbl-td">31</text>
+  <text x="1016" y="270" class="tbl-td">32</text>
+
+  <rect x="540" y="276" width="530" height="20" fill="#eafaf1"/>
+  <text x="570" y="290" class="tbl-label">Grid Pos</text>
+  <text x="648" y="289" class="tbl-sm">R3C0</text>
+  <text x="694" y="289" class="tbl-sm">R3C1</text>
+  <text x="740" y="289" class="tbl-sm">R3C2</text>
+  <text x="786" y="289" class="tbl-sm">R4C0</text>
+  <text x="832" y="289" class="tbl-sm">R4C1</text>
+  <text x="878" y="289" class="tbl-sm">R4C2</text>
+  <text x="924" y="289" class="tbl-sm">R5C0</text>
+  <text x="970" y="289" class="tbl-sm">R5C1</text>
+  <text x="1016" y="289" class="tbl-sm">R5C2</text>
+
+  <rect x="540" y="212" width="530" height="85" rx="5" fill="none" stroke="#27ae60" stroke-width="1.5"/>
+
+  <!-- ===== PICO 2 TABLE ===== -->
+  <rect x="540" y="312" width="530" height="22" rx="5" fill="#e67e22"/>
+  <text x="805" y="328" text-anchor="middle" class="pico-title">PICO 2 — PICO_ID=2 — SPI bytes 18–26 — Top-Right Quadrant</text>
+
+  <rect x="540" y="334" width="530" height="20" fill="#f0a04b"/>
+  <text x="570" y="348" class="tbl-label" fill="#fff">GPIO Pin</text>
+  <text x="648" y="348" class="tbl-th">0</text>
+  <text x="694" y="348" class="tbl-th">1</text>
+  <text x="740" y="348" class="tbl-th">2</text>
+  <text x="786" y="348" class="tbl-th">3</text>
+  <text x="832" y="348" class="tbl-th">4</text>
+  <text x="878" y="348" class="tbl-th">5</text>
+  <text x="924" y="348" class="tbl-th">6</text>
+  <text x="970" y="348" class="tbl-th">7</text>
+  <text x="1016" y="348" class="tbl-th">8</text>
+
+  <rect x="540" y="354" width="530" height="22" fill="#fdebd0"/>
+  <text x="570" y="369" class="tbl-label">Motor ID</text>
+  <text x="648" y="370" class="tbl-td">3</text>
+  <text x="694" y="370" class="tbl-td">4</text>
+  <text x="740" y="370" class="tbl-td">5</text>
+  <text x="786" y="370" class="tbl-td">9</text>
+  <text x="832" y="370" class="tbl-td">10</text>
+  <text x="878" y="370" class="tbl-td">11</text>
+  <text x="924" y="370" class="tbl-td">15</text>
+  <text x="970" y="370" class="tbl-td">16</text>
+  <text x="1016" y="370" class="tbl-td">17</text>
+
+  <rect x="540" y="376" width="530" height="20" fill="#fef5e7"/>
+  <text x="570" y="390" class="tbl-label">Grid Pos</text>
+  <text x="648" y="389" class="tbl-sm">R0C3</text>
+  <text x="694" y="389" class="tbl-sm">R0C4</text>
+  <text x="740" y="389" class="tbl-sm">R0C5</text>
+  <text x="786" y="389" class="tbl-sm">R1C3</text>
+  <text x="832" y="389" class="tbl-sm">R1C4</text>
+  <text x="878" y="389" class="tbl-sm">R1C5</text>
+  <text x="924" y="389" class="tbl-sm">R2C3</text>
+  <text x="970" y="389" class="tbl-sm">R2C4</text>
+  <text x="1016" y="389" class="tbl-sm">R2C5</text>
+
+  <rect x="540" y="312" width="530" height="85" rx="5" fill="none" stroke="#e67e22" stroke-width="1.5"/>
+
+  <!-- ===== PICO 3 TABLE ===== -->
+  <rect x="540" y="412" width="530" height="22" rx="5" fill="#c0392b"/>
+  <text x="805" y="428" text-anchor="middle" class="pico-title">PICO 3 — PICO_ID=3 — SPI bytes 27–35 — Bottom-Right Quadrant</text>
+
+  <rect x="540" y="434" width="530" height="20" fill="#e06050"/>
+  <text x="570" y="448" class="tbl-label" fill="#fff">GPIO Pin</text>
+  <text x="648" y="448" class="tbl-th">0</text>
+  <text x="694" y="448" class="tbl-th">1</text>
+  <text x="740" y="448" class="tbl-th">2</text>
+  <text x="786" y="448" class="tbl-th">3</text>
+  <text x="832" y="448" class="tbl-th">4</text>
+  <text x="878" y="448" class="tbl-th">5</text>
+  <text x="924" y="448" class="tbl-th">6</text>
+  <text x="970" y="448" class="tbl-th">7</text>
+  <text x="1016" y="448" class="tbl-th">8</text>
+
+  <rect x="540" y="454" width="530" height="22" fill="#fadbd8"/>
+  <text x="570" y="469" class="tbl-label">Motor ID</text>
+  <text x="648" y="470" class="tbl-td">21</text>
+  <text x="694" y="470" class="tbl-td">22</text>
+  <text x="740" y="470" class="tbl-td">23</text>
+  <text x="786" y="470" class="tbl-td">27</text>
+  <text x="832" y="470" class="tbl-td">28</text>
+  <text x="878" y="470" class="tbl-td">29</text>
+  <text x="924" y="470" class="tbl-td">33</text>
+  <text x="970" y="470" class="tbl-td">34</text>
+  <text x="1016" y="470" class="tbl-td">35</text>
+
+  <rect x="540" y="476" width="530" height="20" fill="#fdf2f0"/>
+  <text x="570" y="490" class="tbl-label">Grid Pos</text>
+  <text x="648" y="489" class="tbl-sm">R3C3</text>
+  <text x="694" y="489" class="tbl-sm">R3C4</text>
+  <text x="740" y="489" class="tbl-sm">R3C5</text>
+  <text x="786" y="489" class="tbl-sm">R4C3</text>
+  <text x="832" y="489" class="tbl-sm">R4C4</text>
+  <text x="878" y="489" class="tbl-sm">R4C5</text>
+  <text x="924" y="489" class="tbl-sm">R5C3</text>
+  <text x="970" y="489" class="tbl-sm">R5C4</text>
+  <text x="1016" y="489" class="tbl-sm">R5C5</text>
+
+  <rect x="540" y="412" width="530" height="85" rx="5" fill="none" stroke="#c0392b" stroke-width="1.5"/>
+
+  <!-- ============ QUICK REFERENCE (right side, below tables) ============ -->
+  <text x="540" y="525" class="section-title">QUICK REFERENCE</text>
+
+  <rect x="540" y="535" width="530" height="100" rx="6" fill="#fff" stroke="#ddd" stroke-width="1"/>
+
+  <text x="555" y="555" class="note-bold">To identify a motor:</text>
+  <text x="555" y="572" class="note-text">1. Find motor number on the grid (left)</text>
+  <text x="555" y="589" class="note-text">2. Read Pico ID (P0–P3) and GPIO pin (GP0–GP8) from the cell</text>
+  <text x="555" y="606" class="note-text">3. Trace the wire from that Pico's GPIO pin to the motor/ESC</text>
+
+  <text x="855" y="555" class="note-bold">To replace a Pico:</text>
+  <text x="855" y="572" class="note-text">1. Flash firmware with correct PICO_ID</text>
+  <text x="855" y="589" class="note-text">2. Connect 6 bus wires (see Page 1)</text>
+  <text x="855" y="606" class="note-text">3. Reconnect 9 motor wires (GP0–GP8)</text>
+
+  <!-- ============ BOTTOM: WIRING PATTERN ============ -->
+  <rect x="40" y="650" width="1042" height="108" rx="6" fill="#fff8e1" stroke="#f0d060" stroke-width="1.2"/>
+  <text x="60" y="673" class="section-title" fill="#b7950b">MOTOR WIRING PATTERN (per Pico)</text>
+
+  <text x="60" y="695" class="note-text">Each Pico drives 9 motors via PWM on GPIO 0–8. Motors are wired in row-major order within their 3×3 quadrant:</text>
+  <text x="60" y="715" class="note-bold">GPIO 0, 1, 2 → First row of quadrant  ·  GPIO 3, 4, 5 → Second row  ·  GPIO 6, 7, 8 → Third row</text>
+  <text x="60" y="735" class="note-text">Motor signal wire connects: Pico GPIO pin → ESC signal input. ESC powers the motor independently.</text>
+  <text x="60" y="748" class="note-text">PWM range: 1000–2000 μs (byte value 0–255 maps linearly). Min running speed: 1200 μs.</text>
+
+  <!-- Footer -->
+  <text x="561" y="775" text-anchor="middle" class="footer-text">Active Wind Wall — ISM WiMi · Motor Mapping · Page 2 of 2 · Print at A4 Landscape</text>
+</svg>
