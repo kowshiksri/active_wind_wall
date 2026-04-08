@@ -135,7 +135,9 @@ def flight_loop(
         active_slew_limit = (slew_limit_override if slew_limit_override is not None else MAX_PWM_SLEW_LIMIT) * LOOP_TIME_MS
         frame_count = 0
         last_sent_pwm = np.full(NUM_MOTORS, float(PWM_MIN))  # track last transmitted values
-        DELTA_THRESHOLD = 3.0  # µs — only send if any motor changed by more than this
+        last_sent_time = time.perf_counter()
+        DELTA_THRESHOLD = 3.0   # µs  — send if any motor changed by more than this
+        HEARTBEAT_S     = 0.150 # sec — send at least every 150ms to feed the watchdog
         loop_start_time = time.perf_counter()
         
         print("[FlightLoop] Ready to begin control loop")
@@ -176,13 +178,16 @@ def flight_loop(
             # Final clamp to valid PWM range
             pwm_safe = np.clip(pwm_safe, PWM_MIN, PWM_MAX)
             
-            # --- Step 4: Send to hardware (delta-only) ---
-            # Only transmit when at least one motor changed by > DELTA_THRESHOLD µs.
-            # PWM hardware holds the last value autonomously — no need to re-send
-            # identical frames. This eliminates continuous SPI streaming jitter.
-            if np.any(np.abs(pwm_safe - last_sent_pwm) > DELTA_THRESHOLD):
+            # --- Step 4: Send to hardware (delta + heartbeat) ---
+            # Send if any motor changed by > DELTA_THRESHOLD µs (delta-driven),
+            # OR if 150ms has elapsed since the last send (heartbeat to keep the
+            # Pico watchdog fed — it kills motors after 200ms of SYNC silence).
+            now = time.perf_counter()
+            if (np.any(np.abs(pwm_safe - last_sent_pwm) > DELTA_THRESHOLD)
+                    or (now - last_sent_time) >= HEARTBEAT_S):
                 hardware.send_pwm(pwm_safe)
                 last_sent_pwm = pwm_safe.copy()
+                last_sent_time = now
 
             # --- Step 5: Update shared memory ---
             shared_buffer.set_pwm(pwm_safe)
