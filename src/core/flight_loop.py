@@ -134,6 +134,8 @@ def flight_loop(
         )
         active_slew_limit = (slew_limit_override if slew_limit_override is not None else MAX_PWM_SLEW_LIMIT) * LOOP_TIME_MS
         frame_count = 0
+        last_sent_pwm = np.full(NUM_MOTORS, float(PWM_MIN))  # track last transmitted values
+        DELTA_THRESHOLD = 3.0  # µs — only send if any motor changed by more than this
         loop_start_time = time.perf_counter()
         
         print("[FlightLoop] Ready to begin control loop")
@@ -174,8 +176,13 @@ def flight_loop(
             # Final clamp to valid PWM range
             pwm_safe = np.clip(pwm_safe, PWM_MIN, PWM_MAX)
             
-            # --- Step 4: Send to hardware ---
-            hardware.send_pwm(pwm_safe)
+            # --- Step 4: Send to hardware (delta-only) ---
+            # Only transmit when at least one motor changed by > DELTA_THRESHOLD µs.
+            # PWM hardware holds the last value autonomously — no need to re-send
+            # identical frames. This eliminates continuous SPI streaming jitter.
+            if np.any(np.abs(pwm_safe - last_sent_pwm) > DELTA_THRESHOLD):
+                hardware.send_pwm(pwm_safe)
+                last_sent_pwm = pwm_safe.copy()
 
             # --- Step 5: Update shared memory ---
             shared_buffer.set_pwm(pwm_safe)
