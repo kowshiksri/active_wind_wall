@@ -133,7 +133,7 @@ int main() {
 
         // Only configure each slice once (skip if already seen via its pair pin)
         if (!(slice_mask & (1u << slices[i]))) {
-            pwm_set_clkdiv(slices[i], 125.0f);  // 125 MHz / 125 = 1 MHz = 1 µs per tick
+            pwm_set_clkdiv(slices[i], 150.0f);  // 150 MHz / 150 = 1 MHz → 1 tick = 1 µs exactly
             pwm_set_wrap(slices[i], 20000);      // 20000 ticks × 1 µs = 20 ms = 50 Hz
         }
         slice_mask |= (1u << slices[i]);
@@ -233,9 +233,9 @@ int main() {
         // If no SYNC received for >200ms, assume communication lost
         // Set all motors to idle and blink LED rapidly
         if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
-            // Emergency stop: cut PWM output entirely (no pulse)
+            // Safety fallback: hold ESCs at armed-idle (1000 µs)
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                set_motor_pwm_us(i, 0);
+                set_motor_pwm_us(i, 1000);
             }
             
             // Fast LED blink (5 Hz) to indicate error state
