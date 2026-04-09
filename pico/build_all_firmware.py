@@ -30,6 +30,15 @@ CMAKE_TEMPLATE = PICO_DIR / "CMakeLists.txt"
 NUM_BOARDS = 4
 
 
+def select_cmake_generator():
+    """Select a CMake generator that exists on this machine."""
+    if shutil.which("ninja"):
+        return "Ninja"
+    if shutil.which("make"):
+        return "Unix Makefiles"
+    return None
+
+
 def print_header(message):
     """Print a formatted header"""
     print(f"\n{'=' * 70}")
@@ -155,8 +164,15 @@ def build_firmware(pico_id, step_num, total_steps):
     
     # Step 4: Run CMake
     print(f"    Running CMake configuration...")
+    generator = select_cmake_generator()
+    if generator is None:
+        print(f"    ✗ No supported CMake build tool found for Pico {pico_id}")
+        print("    Install either 'ninja' or 'make' and try again.")
+        return False
+
+    cmake_cmd = ["cmake", "..", "-G", generator]
     cmake_result = subprocess.run(
-        ["cmake", "-G", "Ninja", ".."],
+        cmake_cmd,
         cwd=build_dir,
         capture_output=True,
         text=True
@@ -164,6 +180,7 @@ def build_firmware(pico_id, step_num, total_steps):
     
     if cmake_result.returncode != 0:
         print(f"    ✗ CMake failed for Pico {pico_id}")
+        print(f"    Generator used: {generator}")
         print(f"    Error output:")
         print(cmake_result.stderr)
         return False
