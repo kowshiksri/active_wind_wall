@@ -67,9 +67,9 @@ class RealSPI:
         print("[SPI] Initialized SPI0 (GPIO10=MOSI, GPIO11=SCLK)")
     
     def write_bytes(self, data: List[int]) -> None:
-        """Send bytes via SPI. Each byte triggers CS toggle for Pico sync."""
-        for b in data:
-            self.spi.xfer2([int(b) & 0xFF])
+        """Send all 36 bytes as one SPI transaction (CS held low throughout).
+        CS rising edge at the end signals the Pico that the frame is complete."""
+        self.spi.xfer2([int(b) & 0xFF for b in data])
 
     def close(self) -> None:
         self.spi.close()
@@ -186,17 +186,15 @@ class HardwareInterface:
                 byte_val = max(1, min(255, byte_val))
             packet.append(byte_val)
 
-        # 3. Send via SPI then trigger Sync atomically
-        # Both are in one try block: if SPI fails, Sync is NOT triggered
-        # (sending a sync pulse after a partial/failed frame would latch bad data)
+        # 3. Send — CS rising edge at end of transaction triggers Pico latch.
+        # No separate sync pin needed in cs-framed architecture.
         try:
             self.spi.write_bytes(packet)
-            self.gpio.toggle_sync_pin()
         except Exception as e:
             print(f"[HW] Send Error (frame {self.frames_sent}): {e}")
-        
+
         if self.frames_sent % 400 == 0:
-            print(f"[HW] Frame {self.frames_sent}: Broadcast sent, sync triggered")
+            print(f"[HW] Frame {self.frames_sent}: Broadcast sent")
 
     def close(self) -> None:
         """Cleanup hardware resources."""
