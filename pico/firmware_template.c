@@ -89,23 +89,13 @@ void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
 
 /**
  * SYNC pin interrupt handler
- * 
+ *
  * Called on rising edge of SYNC signal from Raspberry Pi.
- * Signals that a complete 36-byte frame has been transmitted
- * and PWM values should be updated atomically.
- * 
- * Also blinks LED every 20 SYNC pulses to indicate activity.
+ * Sets flag only — all processing happens in the main loop.
  */
 void sync_irq_handler(uint gpio, uint32_t events) {
     if (gpio == SYNC_PIN) {
         sync_pulse_detected = true;
-        sync_counter++;
-        
-        // Toggle LED every 20 frames for visual feedback
-        if (sync_counter >= 20) {
-            gpio_xor_mask(1u << LED_PIN);
-            sync_counter = 0;
-        }
     }
 }
 
@@ -166,15 +156,14 @@ int main() {
     gpio_pull_down(SYNC_PIN);
     gpio_set_irq_enabled_with_callback(SYNC_PIN, GPIO_IRQ_EDGE_RISE, true, &sync_irq_handler);
 
-    // Safety watchdog timing
-    absolute_time_t last_sync_time = get_absolute_time();
-    const uint64_t SAFETY_TIMEOUT_US = 200000; // 200 ms without SYNC = communication loss
-
     // ==========================================
     // MAIN LOOP
+    // Pure pass-through: receive SPI bytes, latch on SYNC, set PWM.
+    // No watchdog — Pi is the sole authority. Physical kill switch
+    // is the safety backstop.
     // ==========================================
     while (true) {
-        
+
         // === Step A: Receive SPI data ===
         // Read bytes as they arrive over SPI
         // Each byte represents one motor value (0-255) in the 36-motor array
@@ -198,7 +187,6 @@ int main() {
         // On SYNC rising edge: latch motor values and update PWM atomically
         if (sync_pulse_detected) {
             sync_pulse_detected = false;
-            last_sync_time = get_absolute_time();
 
             // Atomic snapshot: copy latest SPI values to active buffer
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
@@ -218,28 +206,22 @@ int main() {
                     // 1200 us = minimum active, 2000 us = maximum
                     target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
                 }
-                
+
                 // Safety clamp
                 if (target_pwm > 2000) target_pwm = 2000;
-                
+
                 set_motor_pwm_us(i, target_pwm);
             }
 
             // Reset frame byte counter for next transmission cycle
             byte_index = 0;
-        }
 
-        // === Step C: Safety watchdog ===
-        // If no SYNC received for >200ms, assume communication lost
-        // Set all motors to idle and blink LED rapidly
-        if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
-            // Safety fallback: hold ESCs at armed-idle (1000 µs)
-            for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                set_motor_pwm_us(i, 1000);
+            // Toggle LED every 20 frames for visual feedback
+            sync_counter++;
+            if (sync_counter >= 20) {
+                gpio_xor_mask(1u << LED_PIN);
+                sync_counter = 0;
             }
-            
-            // Fast LED blink (5 Hz) to indicate error state
-            gpio_put(LED_PIN, (to_ms_since_boot(get_absolute_time()) % 200) < 100);
         }
     }
 }
