@@ -2,7 +2,12 @@
 #include "hardware/pwm.h"
 #include "hardware/spi.h"
 #include "hardware/gpio.h"
+#include "hardware/clocks.h"
 #include <stdbool.h>
+
+// PWM timing — derived at runtime from actual system clock (no hardcoded assumptions)
+#define PWM_DIVIDER  64.0f   // Clock prescaler applied to sys_clk before PWM counter
+#define PWM_FREQ_HZ  50.0f   // Target ESC PWM frequency (standard servo/ESC = 50 Hz)
 
 // ==========================================
 // CONFIGURATION
@@ -50,6 +55,10 @@ static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 uint slices[MOTORS_PER_PICO];      // PWM slice numbers
 uint channels[MOTORS_PER_PICO];    // PWM channel numbers (A or B)
 
+// Computed at boot from actual sys_clk — used by set_motor_pwm_us()
+uint16_t pwm_wrap_value = 0;       // PWM counter period (ticks per 20 ms frame)
+float    counts_per_us  = 0.0f;    // PWM counter ticks per microsecond
+
 // Motor control buffers
 volatile uint8_t motor_values[MOTORS_PER_PICO];         // Incoming values from SPI (0-255)
 volatile uint8_t active_frame_buffer[MOTORS_PER_PICO];  // Latched values for current frame
@@ -65,19 +74,15 @@ volatile uint8_t byte_index = 0;  // Current position in 36-byte frame (0..35)
 // PWM CONTROL
 // ==========================================
 void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
-    // 0 = PWM off (no pulse output at all)
-    if (pulse_us == 0) {
-        pwm_set_chan_level(slices[motor_index], channels[motor_index], 0);
-        return;
-    }
-
-    // Clamp to valid PWM range
+    // Clamp to valid ESC PWM range
     if (pulse_us < 1000) pulse_us = 1000;
     if (pulse_us > 2000) pulse_us = 2000;
 
-    // 1 tick = 1 µs, so level = pulse_us directly
-    uint16_t level = pulse_us;
-    if (level > 20000) level = 20000;
+    // Convert µs → counter ticks using the runtime-computed ratio.
+    // counts_per_us = sys_hz / PWM_DIVIDER / 1_000_000, so this is
+    // correct regardless of which system clock frequency the Pico boots at.
+    uint16_t level = (uint16_t)(pulse_us * counts_per_us);
+    if (level > pwm_wrap_value) level = pwm_wrap_value;
 
     // Update PWM hardware
     pwm_set_chan_level(slices[motor_index], channels[motor_index], level);
@@ -115,6 +120,16 @@ void sync_irq_handler(uint gpio, uint32_t events) {
 int main() {
     stdio_init_all();
 
+    // --- Runtime clock calibration (fixes #1, #2, #3) ---
+    // Query the actual system clock rather than assuming a fixed frequency.
+    // The Pico SDK default is 125 MHz; overclocked boards may differ.
+    // All PWM timing is derived from this value so the firmware is portable.
+    const uint32_t sys_hz = clock_get_hz(clk_sys);
+    counts_per_us  = (float)sys_hz / PWM_DIVIDER / 1000000.0f;
+    pwm_wrap_value = (uint16_t)((float)sys_hz / PWM_DIVIDER / PWM_FREQ_HZ) - 1;
+    // Example at 125 MHz: divider=64 → tick_rate=1.953 MHz → wrap=39062 → 50 Hz
+    // Example at 150 MHz: divider=64 → tick_rate=2.344 MHz → wrap=46874 → 50 Hz
+
     // Initialize status LED (on at startup)
     gpio_init(LED_PIN);
     gpio_set_dir(LED_PIN, GPIO_OUT);
@@ -133,8 +148,8 @@ int main() {
 
         // Only configure each slice once (skip if already seen via its pair pin)
         if (!(slice_mask & (1u << slices[i]))) {
-            pwm_set_clkdiv(slices[i], 150.0f);  // 150 MHz / 150 = 1 MHz → 1 tick = 1 µs exactly
-            pwm_set_wrap(slices[i], 20000);      // 20000 ticks × 1 µs = 20 ms = 50 Hz
+            pwm_set_clkdiv(slices[i], PWM_DIVIDER);   // named constant, not magic number
+            pwm_set_wrap(slices[i], pwm_wrap_value);   // derived from actual sys_hz at runtime
         }
         slice_mask |= (1u << slices[i]);
 
@@ -142,8 +157,10 @@ int main() {
         motor_values[i] = 0;
         active_frame_buffer[i] = 0;
 
-        // Set initial level — no pulse until GUI arms the system
-        pwm_set_chan_level(slices[i], channels[i], 0);
+        // Fix #4: output a valid 1000 µs armed-idle pulse immediately on boot.
+        // ESCs require a continuous PWM signal once powered; silent output (level=0)
+        // can cause ESCs to enter an undefined state before the first SYNC arrives.
+        set_motor_pwm_us(i, 1000);
     }
 
     // Phase 2: enable all slices simultaneously — clean, glitch-free start
