@@ -1,84 +1,135 @@
 """
 Global configuration constants for the Active Wind Wall Control System.
+
+All tunable parameters live here. See config/PARAMETERS.md for the full
+derivation and rationale behind every value — read that before changing
+anything, especially UPDATE_RATE_HZ, SPI_SPEED_HZ, or the PWM limits.
 """
 
-# Hardware Configuration
-NUM_MOTORS: int = 36
-UPDATE_RATE_HZ: int = 400
-LOOP_TIME_MS: float = 1000.0 / UPDATE_RATE_HZ  # 2.5 ms
+# ─────────────────────────────────────────────
+# HARDWARE TOPOLOGY
+# ─────────────────────────────────────────────
+NUM_MOTORS: int = 36          # Total motors in the array (6×6 grid)
+NUM_PICOS:  int = 4           # Number of Pico boards
+MOTORS_PER_PICO: int = NUM_MOTORS // NUM_PICOS   # Derived — do not set manually
 
-# PWM Signal Configuration
-PWM_MIN: int = 1000  # Minimum PWM pulse width in microseconds (arming / stopped)
-PWM_MIN_RUNNING: int = 1200  # Minimum PWM for motor to actually spin (provisional — characterise per motor)
-PWM_MAX: int = 2000  # Maximum PWM pulse width in microseconds
-PWM_CENTER: int = (PWM_MIN + PWM_MAX) // 2  # 1500 µs neutral point
+# ─────────────────────────────────────────────
+# CONTROL LOOP TIMING
+# ─────────────────────────────────────────────
+# UPDATE_RATE_HZ is constrained by SPI frame delivery time, not by the Pico.
+# See config/PARAMETERS.md §"Loop Rate Derivation" for the full calculation.
+#
+# With 1 MHz SPI and Python byte-at-a-time overhead (~150 µs/byte worst case):
+#   frame delivery = 36 bytes × 158 µs = 5,688 µs
+#   + 200 µs inter-frame buffer          = 5,888 µs  →  ~170 Hz max
+#   × 1.15 safety margin                 = ~6,770 µs →  ~147 Hz
+#   rounded to clean number              = 125 Hz (8 ms loop)
+#
+# ESCs update their own PWM output at 50 Hz — 125 Hz is already 2.5× that.
+# Do NOT raise this above 170 without first switching to a single xfer2() SPI call.
+UPDATE_RATE_HZ: int   = 125
+LOOP_TIME_MS:  float  = 1000.0 / UPDATE_RATE_HZ   # 8.0 ms — derived, do not edit
 
-# Safety Parameters
-MAX_PWM_SLEW_LIMIT: int = 25.0  # µs/ms — absolute, independent of loop rate
+# ─────────────────────────────────────────────
+# PWM SIGNAL RANGE
+# ─────────────────────────────────────────────
+# Standard RC/ESC servo PWM: 1000 µs = stopped/armed, 2000 µs = full throttle.
+# These values must match the Pico firmware (firmware_template.c) exactly.
+# If you change PWM_MIN_RUNNING here, update the Pico firmware mapping too.
+PWM_MIN:         int = 1000   # µs — armed/idle (ESC holds but does not spin)
+PWM_MIN_RUNNING: int = 1200   # µs — minimum pulse to actually spin the motor
+                               #      provisional: characterise per motor type
+PWM_MAX:         int = 2000   # µs — full throttle
+PWM_CENTER:      int = (PWM_MIN + PWM_MAX) // 2   # 1500 µs — midpoint, derived
 
-# Signal Synthesis
-FOURIER_TERMS: int = 7  # Number of Fourier coefficients per motor
-BASE_FREQUENCY: float = 1.0  # Hz (base frequency for periodic signals)
-# Optional per-experiment defaults
-EXPERIMENT_DURATION_S: float = 10.0  # Default run length; can be overridden per run
-# Normalized signal bounds (can be narrowed per experiment; never remapped)
-SIGNAL_MIN_DEFAULT: float = 0.0
-SIGNAL_MAX_DEFAULT: float = 1.0
+# ─────────────────────────────────────────────
+# SAFETY CONSTRAINTS
+# ─────────────────────────────────────────────
+# Slew limit is in µs/ms — absolute, loop-rate-independent.
+# 25 µs/ms means a motor can travel the full 800 µs PWM range in ~32 ms.
+# Raise this if motors feel sluggish; lower it if startup jerks are a problem.
+MAX_PWM_SLEW_LIMIT: float = 25.0   # µs/ms
 
-# Visualization Parameters
-GUI_UPDATE_RATE_FPS: int = 60
-LOG_INTERVAL_MS: int = 100
+# ─────────────────────────────────────────────
+# SIGNAL SYNTHESIS
+# ─────────────────────────────────────────────
+FOURIER_TERMS:        int   = 7     # Harmonics per motor for Fourier synthesis
+BASE_FREQUENCY:       float = 1.0   # Hz — fundamental frequency for periodic signals
+EXPERIMENT_DURATION_S: float = 10.0 # Default run length in seconds (overridable per run)
+SIGNAL_MIN_DEFAULT:   float = 0.0   # Normalized signal lower bound
+SIGNAL_MAX_DEFAULT:   float = 1.0   # Normalized signal upper bound
 
-# Shared Memory
+# ─────────────────────────────────────────────
+# GUI / LOGGING
+# ─────────────────────────────────────────────
+GUI_UPDATE_RATE_FPS: int = 40       # GUI oscilloscope refresh rate (Hz)
+LOG_INTERVAL_MS:     int = 100      # CSV log entry interval (ms)
+
+# ─────────────────────────────────────────────
+# SHARED MEMORY (inter-process, GUI ↔ flight loop)
+# ─────────────────────────────────────────────
 SHARED_MEM_NAME: str = "aww_control_buffer"
-SHARED_MEM_SIZE: int = 36 * 8  # 36 motors * PWM values * 8 bytes (float64)
+SHARED_MEM_SIZE: int = NUM_MOTORS * 8   # NUM_MOTORS × float64 (8 bytes each) — derived
 
-# Pico Hardware Mapping
-# Maps motors to Picos and their pin positions on each Pico.
-# Modify this mapping to change which motors connect to which Picos.
-# Structure:
-#   - 'pico_id': Which Pico receives these motors (0-3 for 4 Picos)
-#   - 'motors': List of motor IDs for this Pico
-#   - 'pin_offset': Starting pin position on this Pico (for future use with varied pin layouts)
+# ─────────────────────────────────────────────
+# SPI BUS CONFIGURATION
+# ─────────────────────────────────────────────
+# The Pico is SPI slave — it accepts whatever clock the Pi master drives.
+# SPI_SPEED_HZ sets the Pi master clock via spidev.max_speed_hz.
 #
-# PHYSICAL LAYOUT (default):
-#   Motors 0-8:    Top-Left Quadrant    → Pico0
-#   Motors 9-17:   Top-Right Quadrant   → Pico1
-#   Motors 18-26:  Bottom-Left Quadrant → Pico2
-#   Motors 27-35:  Bottom-Right Quadrant → Pico3
-#
-# CHANGE THIS MAPPING TO:
-#   - Swap which Pico connects to which quadrant
-#   - Change pin order within a Pico
-#   - Redistribute motors across Picos
-#   - Test with single Pico (motors map to Pico0, others are ignored)
+# Timing budget at 1 MHz with Python byte-at-a-time overhead:
+#   pure SPI/byte = 8 µs  |  Python overhead/byte ≈ 150 µs worst case
+#   See config/PARAMETERS.md §"SPI Clock Choice" for full analysis.
+SPI_BUS:      int = 0          # spidev bus number  (SPI0 on Pi)
+SPI_DEVICE:   int = 0          # spidev device number (CE0)
+SPI_SPEED_HZ: int = 1_000_000  # 1 MHz — Pi drives this; Pico slave ignores its own spi_init() baud
 
-# Set True to test a single motor on Pico0 (motor 0 only).
+# ─────────────────────────────────────────────
+# GPIO SYNC PIN (Pi side)
+# ─────────────────────────────────────────────
+# Rising edge on this pin tells all Picos to latch the SPI frame and update PWM.
+# NOTE: interface.py currently hardcodes GPIO 22 — this constant must match that.
+SYNC_PIN:            int = 22   # GPIO BCM number on Pi (was wrongly 17 — corrected)
+SYNC_PULSE_WIDTH_US: int = 10   # Pulse high duration in µs
+
+# ─────────────────────────────────────────────
+# PICO HARDWARE MAPPING
+# ─────────────────────────────────────────────
+# Maps logical motor IDs (0–35) to physical Pico boards and pin positions.
+# Edit FULL_PICO_MOTOR_MAP to match your actual wiring.
+# Set SINGLE_MOTOR_TEST = True to test one motor on Pico0 without running all boards.
+#
+# Default physical layout:
+#   Motors  0– 8  →  Pico 0  (top-left  3×3)
+#   Motors  9–17  →  Pico 1  (top-right 3×3)
+#   Motors 18–26  →  Pico 2  (bottom-left  3×3)
+#   Motors 27–35  →  Pico 3  (bottom-right 3×3)
+
 SINGLE_MOTOR_TEST: bool = False
 
 FULL_PICO_MOTOR_MAP: dict = {
     'quadrant_top_left': {
         'pico_id': 0,
-        'motors': list(range(0, 9)),      # Motors 0-8
-        'pin_offset': 0,                  # Pins 0-8 on Pico0
+        'motors': list(range(0, 9)),
+        'pin_offset': 0,
         'description': 'Top-Left 3x3 Grid'
     },
     'quadrant_top_right': {
         'pico_id': 1,
-        'motors': list(range(9, 18)),     # Motors 9-17
-        'pin_offset': 0,                  # Pins 0-8 on Pico1
+        'motors': list(range(9, 18)),
+        'pin_offset': 0,
         'description': 'Top-Right 3x3 Grid'
     },
     'quadrant_bottom_left': {
         'pico_id': 2,
-        'motors': list(range(18, 27)),    # Motors 18-26
-        'pin_offset': 0,                  # Pins 0-8 on Pico2
+        'motors': list(range(18, 27)),
+        'pin_offset': 0,
         'description': 'Bottom-Left 3x3 Grid'
     },
     'quadrant_bottom_right': {
         'pico_id': 3,
-        'motors': list(range(27, 36)),    # Motors 27-35
-        'pin_offset': 0,                  # Pins 0-8 on Pico3
+        'motors': list(range(27, 36)),
+        'pin_offset': 0,
         'description': 'Bottom-Right 3x3 Grid'
     }
 }
@@ -96,26 +147,13 @@ PICO_MOTOR_MAP: dict = (
     else FULL_PICO_MOTOR_MAP
 )
 
-# Derived motor-to-Pico lookup (auto-generated from PICO_MOTOR_MAP)
-# Maps motor_id → (pico_id, pin_position_on_pico)
+# Derived reverse lookup: motor_id → (pico_id, pin_on_pico)
+# Auto-built from PICO_MOTOR_MAP — do not edit directly.
 def _build_motor_pico_lookup() -> dict:
-    """Build reverse lookup: motor_id → (pico_id, pin_on_pico)"""
     lookup = {}
-    for quadrant_name, config in PICO_MOTOR_MAP.items():
-        pico_id = config['pico_id']
-        pin_offset = config['pin_offset']
-        for pin_index, motor_id in enumerate(config['motors']):
-            pin_on_pico = pin_offset + pin_index
-            lookup[motor_id] = (pico_id, pin_on_pico)
+    for _, cfg in PICO_MOTOR_MAP.items():
+        for pin_index, motor_id in enumerate(cfg['motors']):
+            lookup[motor_id] = (cfg['pico_id'], cfg['pin_offset'] + pin_index)
     return lookup
 
 MOTOR_TO_PICO_LOOKUP: dict = _build_motor_pico_lookup()
-
-# SPI Configuration
-SPI_BUS: int = 0           # SPI bus number (0 for default)
-SPI_DEVICE: int = 0        # SPI device number (0 for default)
-SPI_SPEED_HZ: int = 1000000  # 1 MHz SPI speed
-
-# GPIO Sync Pin Configuration
-SYNC_PIN: int = 17         # GPIO pin for synchronization trigger
-SYNC_PULSE_WIDTH_US: int = 10  # Sync pulse width in microseconds
