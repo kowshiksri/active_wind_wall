@@ -177,6 +177,14 @@ int main() {
     gpio_set_function(PIN_SCK,  GPIO_FUNC_SPI);
     gpio_set_function(PIN_MOSI, GPIO_FUNC_SPI);
 
+    // Fix: flush SPI FIFO before entering the main loop.
+    // Between SPI init and the first valid Pi frame, the floating MOSI line
+    // can clock garbage bytes into the FIFO. Draining here ensures motor_values[]
+    // is only ever written from real frames, not power-up noise.
+    while (spi_is_readable(SPI_INST)) {
+        (void)spi_get_hw(SPI_INST)->dr;
+    }
+
     // Configure SYNC pin with interrupt on rising edge
     gpio_init(SYNC_PIN);
     gpio_set_dir(SYNC_PIN, GPIO_IN);
@@ -217,32 +225,44 @@ int main() {
             sync_pulse_detected = false;
             last_sync_time = get_absolute_time();
 
-            // Atomic snapshot: copy latest SPI values to active buffer
-            for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                active_frame_buffer[i] = motor_values[i];
-            }
+            // Fix: only apply values if a complete frame was received.
+            // If byte_index < FRAME_BYTES the Pi sent a partial frame (or SYNC
+            // fired early due to noise). Applying a partial frame would leave
+            // some motors on stale/garbage values from the previous cycle.
+            if (byte_index == FRAME_BYTES) {
 
-            // Convert motor values (0-255) to PWM pulse widths and update hardware
-            for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                uint8_t raw_val = active_frame_buffer[i];
-
-                uint16_t target_pwm;
-                if (raw_val == 0) {
-                    // 0 = explicit idle/stop command
-                    target_pwm = 1000;
-                } else {
-                    // Map 1-255 to 1200-2000 us (linear scaling)
-                    // 1200 us = minimum active, 2000 us = maximum
-                    target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
+                // Atomic snapshot: copy latest SPI values to active buffer,
+                // then immediately zero motor_values[] so that any bytes missed
+                // in the NEXT frame default to 0 (→ 1000 µs idle) rather than
+                // silently carrying forward a stale value.
+                for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+                    active_frame_buffer[i] = motor_values[i];
+                    motor_values[i] = 0;
                 }
-                
-                // Safety clamp
-                if (target_pwm > 2000) target_pwm = 2000;
-                
-                set_motor_pwm_us(i, target_pwm);
+
+                // Convert motor values (0-255) to PWM pulse widths and update hardware
+                for (uint i = 0; i < MOTORS_PER_PICO; i++) {
+                    uint8_t raw_val = active_frame_buffer[i];
+
+                    uint16_t target_pwm;
+                    if (raw_val == 0) {
+                        // 0 = explicit idle/stop command
+                        target_pwm = 1000;
+                    } else {
+                        // Map 1-255 to 1200-2000 us (linear scaling)
+                        // 1200 us = minimum active, 2000 us = maximum
+                        target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
+                    }
+
+                    // Safety clamp
+                    if (target_pwm > 2000) target_pwm = 2000;
+
+                    set_motor_pwm_us(i, target_pwm);
+                }
             }
 
-            // Reset frame byte counter for next transmission cycle
+            // Reset frame byte counter for next transmission cycle regardless
+            // of whether the frame was complete — re-sync to the next frame start.
             byte_index = 0;
         }
 
