@@ -1,6 +1,6 @@
 """
 High-speed flight control loop (Process A).
-Runs at 400 Hz with deterministic timing and safety checks.
+Runs at UPDATE_RATE_HZ (configured in config/__init__.py) with deterministic timing and safety checks.
 """
 
 import time
@@ -39,8 +39,8 @@ def flight_loop(
     signal_sample_rate_hz: float | None = None,
 ) -> None: # type: ignore
     """
-    Main flight control loop running at 400 Hz.
-    
+    Main flight control loop running at UPDATE_RATE_HZ.
+
     This function runs in a separate Process and:
     1. Reconstructs motor signals from Fourier coefficients
     2. Applies safety constraints (slew rate limiting, PWM clamping)
@@ -59,7 +59,7 @@ def flight_loop(
         value_min: Minimum signal value
         value_max: Maximum signal value
         enable_logging: If True, log data to CSV file
-        log_interval_frames: Log every N frames (default 40 = 100ms at 400Hz)
+        log_interval_frames: Log every N frames (default 40 = 100ms at 400Hz, ~320ms at 125Hz)
     """
     print(f"[FlightLoop] Initializing at {UPDATE_RATE_HZ} Hz ({LOOP_TIME_MS:.2f} ms)")
     
@@ -132,6 +132,7 @@ def flight_loop(
             float(PWM_MIN),
             _init_active
         )
+        previous_pwm = np.clip(previous_pwm, PWM_MIN, PWM_MAX)  # guard: amp_min+signal>1 can exceed PWM_MAX
         active_slew_limit = (slew_limit_override if slew_limit_override is not None else MAX_PWM_SLEW_LIMIT) * LOOP_TIME_MS
         frame_count = 0
         loop_start_time = time.perf_counter()
@@ -211,7 +212,7 @@ def flight_loop(
             if duration_s is not None and frame_time >= duration_s:
                 stop_event.set()
             
-            # Periodic status (every 100 frames = 250 ms)
+            # Periodic status (every 100 frames = 250 ms at 400 Hz, 800 ms at 125 Hz)
             if frame_count % 100 == 0:
                 elapsed = time.perf_counter() - loop_start_time
                 actual_rate = frame_count / elapsed if elapsed > 0 else 0
