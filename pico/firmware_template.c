@@ -13,13 +13,12 @@
 // CONFIGURATION
 // ==========================================
 
-// Board identifier - IMPORTANT: Change this for each Pico board (0, 1, 2, or 3)
-// Each board controls 9 motors based on its ID
+// Board identifier — injected by build_all_firmware.py for each board (0 .. NUM_PICOS-1)
 #define PICO_ID {{PICO_ID}}
 
-// Motor configuration
-#define MOTORS_PER_PICO 9
-static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
+// Motor configuration — injected from config/__init__.py at build time
+#define MOTORS_PER_PICO {{MOTORS_PER_PICO}}
+static const uint MOTOR_PINS[MOTORS_PER_PICO] = {{MOTOR_PINS}};
 
 // Status LED
 #define LED_PIN 25
@@ -32,10 +31,10 @@ static const uint MOTOR_PINS[MOTORS_PER_PICO] = {0, 1, 2, 3, 4, 5, 6, 7, 8};
 #define PIN_SCK  18   // SPI0 SCK (clock)
 #define PIN_MOSI 16   // SPI0 RX (from Pi MOSI) - Data input
 
-// Frame structure
-// Total system: 36 motors across 4 Pico boards (9 motors each)
-// Each SPI frame contains 36 bytes, one per motor
-#define TOTAL_MOTORS    36
+// Frame structure — injected from config/__init__.py at build time
+// Total system: {{NUM_MOTORS}} motors across {{NUM_PICOS}} Pico boards ({{MOTORS_PER_PICO}} motors each)
+// Each SPI frame contains {{NUM_MOTORS}} bytes, one per motor
+#define TOTAL_MOTORS    {{NUM_MOTORS}}
 #define FRAME_BYTES     TOTAL_MOTORS
 
 // Calculate which bytes in the frame belong to this Pico
@@ -74,9 +73,9 @@ volatile uint8_t byte_index = 0;  // Current position in 36-byte frame (0..35)
 // PWM CONTROL
 // ==========================================
 void set_motor_pwm_us(uint motor_index, uint16_t pulse_us) {
-    // Clamp to valid ESC PWM range
-    if (pulse_us < 1000) pulse_us = 1000;
-    if (pulse_us > 2000) pulse_us = 2000;
+    // Clamp to valid ESC PWM range — limits injected from config/__init__.py
+    if (pulse_us < {{PWM_MIN}}) pulse_us = {{PWM_MIN}};
+    if (pulse_us > {{PWM_MAX}}) pulse_us = {{PWM_MAX}};
 
     // Convert µs → counter ticks using the runtime-computed ratio.
     // counts_per_us = sys_hz / PWM_DIVIDER / 1_000_000, so this is
@@ -157,10 +156,10 @@ int main() {
         motor_values[i] = 0;
         active_frame_buffer[i] = 0;
 
-        // Fix #4: output a valid 1000 µs armed-idle pulse immediately on boot.
+        // Fix #4: output a valid armed-idle pulse immediately on boot.
         // ESCs require a continuous PWM signal once powered; silent output (level=0)
         // can cause ESCs to enter an undefined state before the first SYNC arrives.
-        set_motor_pwm_us(i, 1000);
+        set_motor_pwm_us(i, {{PWM_MIN}});
     }
 
     // Phase 2: enable all slices simultaneously — clean, glitch-free start
@@ -246,16 +245,18 @@ int main() {
 
                     uint16_t target_pwm;
                     if (raw_val == 0) {
-                        // 0 = explicit idle/stop command
-                        target_pwm = 1000;
+                        // 0 = explicit idle/stop — hold at PWM_MIN (armed, not spinning)
+                        target_pwm = {{PWM_MIN}};
                     } else {
-                        // Map 1-255 to 1200-2000 us (linear scaling)
-                        // 1200 us = minimum active, 2000 us = maximum
-                        target_pwm = 1200 + ((uint32_t)raw_val * 800) / 255;
+                        // Map bytes 1-255 → PWM_MIN_RUNNING to PWM_MAX (linear)
+                        // Formula injected from config/__init__.py at build time:
+                        //   PWM_MIN_RUNNING = {{PWM_MIN_RUNNING}} µs
+                        //   PWM_RANGE       = {{PWM_RANGE}} µs  (PWM_MAX - PWM_MIN_RUNNING)
+                        target_pwm = {{PWM_MIN_RUNNING}} + ((uint32_t)raw_val * {{PWM_RANGE}}) / 255;
                     }
 
-                    // Safety clamp
-                    if (target_pwm > 2000) target_pwm = 2000;
+                    // Safety clamp — ceiling from config/__init__.py
+                    if (target_pwm > {{PWM_MAX}}) target_pwm = {{PWM_MAX}};
 
                     set_motor_pwm_us(i, target_pwm);
                 }
@@ -270,9 +271,9 @@ int main() {
         // If no SYNC received for >200ms, assume communication lost
         // Set all motors to idle and blink LED rapidly
         if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
-            // Safety fallback: hold ESCs at armed-idle (1000 µs)
+            // Safety fallback: hold ESCs at armed-idle (PWM_MIN µs)
             for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                set_motor_pwm_us(i, 1000);
+                set_motor_pwm_us(i, {{PWM_MIN}});
             }
             
             // Fast LED blink (5 Hz) to indicate error state
