@@ -135,8 +135,31 @@ def flight_loop(
         previous_pwm = np.clip(previous_pwm, PWM_MIN, PWM_MAX)  # guard: amp_min+signal>1 can exceed PWM_MAX
         active_slew_limit = (slew_limit_override if slew_limit_override is not None else MAX_PWM_SLEW_LIMIT) * LOOP_TIME_MS
         frame_count = 0
+
+        # Warm-up flush: absorb any SPI-init garbage that entered the Pico's
+        # RX FIFO when spidev was opened and configured (setting max_speed_hz,
+        # mode, bits_per_word via ioctl can glitch SCK on some Pi SPI drivers,
+        # clocking 1-3 phantom bytes into the Pico FIFO).
+        #
+        # A phantom byte at position N shifts that frame by N positions, so
+        # specific motors (the first N in PHYSICAL_MOTOR_ORDER) get wrong values.
+        # Two idle flush frames fix this:
+        #   Frame 1: phantom bytes fill positions 0..N-1, flush bytes fill N..35.
+        #            SYNC fires → byte_index == FRAME_BYTES → accepted (idle).
+        #            byte_index reset to 0.
+        #   Frame 2: 36 clean bytes, byte_index 0→36, SYNC → idle applied.
+        #            byte_index reset to 0.
+        # After these two flushes the Pico's frame counter is guaranteed to be
+        # at 0 regardless of how many phantom bytes arrived on SPI init.
+        if not hardware.use_mock:
+            _idle_flush = np.full(NUM_MOTORS, float(PWM_MIN))
+            hardware.send_pwm(_idle_flush)
+            time.sleep(0.025)   # one ESC PWM cycle (20 ms) + 5 ms margin
+            hardware.send_pwm(_idle_flush)
+            time.sleep(0.025)
+
         loop_start_time = time.perf_counter()
-        
+
         print("[FlightLoop] Ready to begin control loop")
         
         while not stop_event.is_set():
