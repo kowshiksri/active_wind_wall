@@ -37,7 +37,7 @@ LOOP_TIME_MS:  float  = 1000.0 / UPDATE_RATE_HZ   # 8.0 ms — derived, do not e
 # These values must match the Pico firmware (firmware_template.c) exactly.
 # If you change PWM_MIN_RUNNING here, update the Pico firmware mapping too.
 PWM_MIN:         int = 1000   # µs — armed/idle (ESC holds but does not spin)
-PWM_MIN_RUNNING: int = 1200   # µs — minimum pulse to actually spin the motor
+PWM_MIN_RUNNING: int = 1000   # µs — minimum pulse to actually spin the motor
                                #      provisional: characterise per motor type
 PWM_MAX:         int = 2000   # µs — full throttle
 PWM_CENTER:      int = (PWM_MIN + PWM_MAX) // 2   # 1500 µs — midpoint, derived
