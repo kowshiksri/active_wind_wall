@@ -869,13 +869,13 @@ class WindWallGUI(QMainWindow):
         base_freq = 1.0 / period if period > 0 else BASE_FREQUENCY
         
         if signal_type == "Custom Fourier":
-            # Generate from custom harmonics
             coeffs = np.zeros((NUM_MOTORS, n_terms))
+            phases = np.zeros((NUM_MOTORS, n_terms))
             for harmonic_num, amplitude, phase_deg in group.custom_harmonics:
                 if 0 <= harmonic_num < n_terms:
                     coeffs[:, harmonic_num] = amplitude
-                    # Phase will be handled separately if needed
-            return coeffs
+                    phases[:, harmonic_num] = np.deg2rad(phase_deg)
+            return coeffs, phases
         
         # Signal swings from 0 to (amp_max - amp_min).
         # amp_min is applied as a PWM floor in the flight loop (only when signal > 0),
@@ -925,15 +925,16 @@ class WindWallGUI(QMainWindow):
                 n_terms=n_terms
             )
         
-        return coeffs
-    
+        return coeffs, np.zeros((NUM_MOTORS, n_terms))  # zero phases for non-custom types
+
     def generate_fourier_coefficients(self):
-        """Generate combined Fourier coefficients, per-motor omega, and amp_min values."""
+        """Generate combined Fourier coefficients, per-motor omega, amp_min, and phase arrays."""
         # Determine max number of terms needed
         max_terms = max((g.fourier_terms for g in self.groups), default=7)
 
-        # Initialize coefficient matrix, omega array, and amp_min array
+        # Initialize arrays
         final_coeffs = np.zeros((NUM_MOTORS, max_terms))
+        final_phases = np.zeros((NUM_MOTORS, max_terms))
         omega_per_motor = np.full(NUM_MOTORS, 2.0 * np.pi * BASE_FREQUENCY, dtype=float)
         amp_min_per_motor = np.zeros(NUM_MOTORS, dtype=float)
 
@@ -942,14 +943,14 @@ class WindWallGUI(QMainWindow):
             if len(group.motors) == 0:
                 continue
 
-            group_coeffs = self.generate_group_coefficients(group)
+            group_coeffs, group_phases = self.generate_group_coefficients(group)
             group_omega = 2.0 * np.pi * (1.0 / group.period) if group.period > 0 else 2.0 * np.pi * BASE_FREQUENCY
 
-            # Assign coefficients, omega, and amp_min to motors in this group
+            # Assign coefficients, phases, omega, and amp_min to motors in this group
             for motor_id in group.motors:
-                # Pad or truncate to match final size
                 terms_to_copy = min(group_coeffs.shape[1], max_terms)
                 final_coeffs[motor_id, :terms_to_copy] = group_coeffs[motor_id, :terms_to_copy]
+                final_phases[motor_id, :terms_to_copy] = group_phases[motor_id, :terms_to_copy]
                 omega_per_motor[motor_id] = group_omega
                 amp_min_per_motor[motor_id] = group.amp_min
 
@@ -958,7 +959,7 @@ class WindWallGUI(QMainWindow):
             if btn.assigned_group is None:
                 final_coeffs[i, :] = 0.0
 
-        return final_coeffs, omega_per_motor, amp_min_per_motor
+        return final_coeffs, omega_per_motor, amp_min_per_motor, final_phases
 
     # ------------------------------------------------------------------
     # Preset save / load
@@ -1137,7 +1138,7 @@ class WindWallGUI(QMainWindow):
         def _loop():
             use_mock = platform.system() != "Linux"
             hw = HardwareInterface(use_mock=use_mock)
-            idle = np.full(NUM_MOTORS, 1000.0)
+            idle = np.full(NUM_MOTORS, float(PWM_MIN))
             try:
                 while not stop.is_set():
                     hw.send_pwm(idle)
@@ -1176,7 +1177,7 @@ class WindWallGUI(QMainWindow):
                 QMessageBox.warning(self, "No Signal File",
                                     "Please load a signal file (.npy or .csv) first.")
                 return
-            coeffs, omega_per_motor, amp_min_per_motor = None, None, None
+            coeffs, omega_per_motor, amp_min_per_motor, phase_radians = None, None, None, None
             signal_table = self.direct_signal_table
             signal_rate = self.direct_signal_rate_hz
         else:
@@ -1185,7 +1186,7 @@ class WindWallGUI(QMainWindow):
                 QMessageBox.warning(self, "No Motors Assigned",
                                     "Please assign at least one motor to a group!")
                 return
-            coeffs, omega_per_motor, amp_min_per_motor = self.generate_fourier_coefficients()
+            coeffs, omega_per_motor, amp_min_per_motor, phase_radians = self.generate_fourier_coefficients()
             signal_table, signal_rate = None, None
 
         # Reset experiment timeline for fresh start
@@ -1218,13 +1219,13 @@ class WindWallGUI(QMainWindow):
         import threading
         experiment_thread = threading.Thread(
             target=self.run_experiment_thread,
-            args=(coeffs, omega_per_motor, amp_min_per_motor, signal_table, signal_rate)
+            args=(coeffs, omega_per_motor, amp_min_per_motor, phase_radians, signal_table, signal_rate)
         )
         experiment_thread.daemon = True
         experiment_thread.start()
     
     def run_experiment_thread(self, coeffs, omega_per_motor, amp_min_per_motor,
-                              signal_table=None, signal_sample_rate_hz=None):
+                              phase_radians=None, signal_table=None, signal_sample_rate_hz=None):
         """Run the experiment (called in separate thread)."""
         import json
         try:
@@ -1268,6 +1269,8 @@ class WindWallGUI(QMainWindow):
                 flight_kwargs['base_freq'] = BASE_FREQUENCY
                 flight_kwargs['omega_per_motor'] = omega_per_motor
                 flight_kwargs['amp_min_per_motor'] = amp_min_per_motor
+                if phase_radians is not None:
+                    flight_kwargs['phase_radians'] = phase_radians
                 # Signal range is now [0, amp_max - amp_min] per group.
                 # value_min must be 0.0 so unassigned motors (signal=0) stay at
                 # PWM_MIN instead of being clipped up to a non-zero floor.
@@ -1335,6 +1338,14 @@ class WindWallGUI(QMainWindow):
                 self.flight_process.terminate()
                 self.flight_process.join()
             
+            # Detach monitor buffer BEFORE unlinking shared memory — prevents the
+            # monitor timer from reading freed memory between unlink and delattr.
+            if hasattr(self, '_monitor_buffer'):
+                try:
+                    self._monitor_buffer.close()
+                except Exception:
+                    pass
+                delattr(self, '_monitor_buffer')
             self.shared_buffer.close()
             self.shared_buffer.unlink()
 
