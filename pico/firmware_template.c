@@ -248,35 +248,17 @@ int main() {
 
                     set_motor_pwm_us(i, target_pwm);
                 }
-<<<<<<< HEAD
-
-                // Safety clamp
-                if (target_pwm > 2000) target_pwm = 2000;
-
-                set_motor_pwm_us(i, target_pwm);
-=======
->>>>>>> fix/pico-clock-portability
             }
 
             // Reset frame byte counter for next transmission cycle regardless
             // of whether the frame was complete — re-sync to the next frame start.
             byte_index = 0;
 
-<<<<<<< HEAD
             // Toggle LED every 20 frames for visual feedback
             sync_counter++;
             if (sync_counter >= 20) {
                 gpio_xor_mask(1u << LED_PIN);
                 sync_counter = 0;
-=======
-        // === Step C: Safety watchdog ===
-        // If no SYNC received for >200ms, assume communication lost
-        // Set all motors to idle and blink LED rapidly
-        if (absolute_time_diff_us(last_sync_time, get_absolute_time()) > SAFETY_TIMEOUT_US) {
-            // Safety fallback: hold ESCs at armed-idle (PWM_MIN µs)
-            for (uint i = 0; i < MOTORS_PER_PICO; i++) {
-                set_motor_pwm_us(i, {{PWM_MIN}});
->>>>>>> fix/pico-clock-portability
             }
         }
     }
