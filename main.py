@@ -89,7 +89,20 @@ def main(
     print(f"[Main] Launching flight_loop process (logging={'ON' if enable_logging else 'OFF'})...")
     flight_process = multiprocessing.Process(
         target=flight_loop,
-        args=(stop_event, use_mock, fourier_coeffs, BASE_FREQUENCY, omega_per_motor, None, start_delay_s, value_min, value_max, enable_logging),
+        args=(stop_event,),
+        kwargs=dict(
+            use_mock_hardware=use_mock,
+            fourier_coeffs=fourier_coeffs,
+            base_freq=BASE_FREQUENCY,
+            omega_per_motor=omega_per_motor,
+            phase_radians=None,
+            start_time_offset=start_delay_s,
+            value_min=value_min,
+            value_max=value_max,
+            amp_min_per_motor=None,
+            duration_s=experiment_duration_s,
+            enable_logging=enable_logging,
+        ),
         name="FlightLoop",
         daemon=False
     )
