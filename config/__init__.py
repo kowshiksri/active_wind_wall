@@ -146,14 +146,3 @@ PICO_MOTOR_MAP: dict = (
     if SINGLE_MOTOR_TEST
     else FULL_PICO_MOTOR_MAP
 )
-
-# Derived reverse lookup: motor_id → (pico_id, pin_on_pico)
-# Auto-built from PICO_MOTOR_MAP — do not edit directly.
-def _build_motor_pico_lookup() -> dict:
-    lookup = {}
-    for _, cfg in PICO_MOTOR_MAP.items():
-        for pin_index, motor_id in enumerate(cfg['motors']):
-            lookup[motor_id] = (cfg['pico_id'], cfg['pin_offset'] + pin_index)
-    return lookup
-
-MOTOR_TO_PICO_LOOKUP: dict = _build_motor_pico_lookup()
