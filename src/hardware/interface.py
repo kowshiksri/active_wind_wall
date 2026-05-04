@@ -178,7 +178,7 @@ class HardwareInterface:
         _range = PWM_MAX - PWM_MIN_RUNNING
         packet = []
         for pwm in reordered_pwm:
-            if pwm < PWM_MIN_RUNNING:
+            if pwm < PWM_MIN_RUNNING or pwm <= PWM_MIN:
                 byte_val = 0x00
             else:
                 clipped = max(PWM_MIN_RUNNING, min(PWM_MAX, pwm))
