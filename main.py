@@ -158,6 +158,7 @@ def main(
             flight_process.join()
         
         # Cleanup shared memory
+        shared_buffer.close()
         shared_buffer.unlink()
         print("[Main] All processes terminated")
         print("="*70)
