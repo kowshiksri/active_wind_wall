@@ -139,6 +139,7 @@ class WindWallGUI(QMainWindow):
         self.flight_process = None
         self.stop_event = None
         self.shared_buffer = None
+        self.param_queue = None
         self.heartbeat_stop_event = None
         self.heartbeat_thread = None
         # Direct signal mode state
@@ -362,6 +363,29 @@ class WindWallGUI(QMainWindow):
         
         fourier_cfg_layout.addWidget(self.custom_params_widget)
         self.custom_params_widget.hide()
+
+        # Live-apply button — pushes current group params to the running experiment
+        self.apply_group_btn = QPushButton("Apply Group Live")
+        self.apply_group_btn.setEnabled(False)
+        self.apply_group_btn.setMinimumHeight(36)
+        self.apply_group_btn.setToolTip(
+            "Push current group parameters to the running experiment without stopping.\n"
+            "Only active in Fourier mode while an experiment is running."
+        )
+        self.apply_group_btn.clicked.connect(self.on_apply_group_live)
+        self.apply_group_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                font-size: 12px;
+                font-weight: bold;
+            }
+            QPushButton:hover { background-color: #388E3C; }
+            QPushButton:disabled { background-color: #cccccc; color: #888; }
+        """)
+        fourier_cfg_layout.addWidget(self.apply_group_btn)
 
         # Add the fourier wrapper to the main config layout
         config_layout.addWidget(self.fourier_config_widget)
@@ -749,6 +773,32 @@ class WindWallGUI(QMainWindow):
             elif self.phase_offset_spinbox.isVisible():
                 group.phase_offset = self.phase_offset_spinbox.value()
     
+    def on_apply_group_live(self):
+        """Push current group parameters to the running flight_loop without restarting."""
+        if not self.experiment_running or self.param_queue is None:
+            return
+        if self.signal_mode.currentText() == "Direct (file)":
+            return
+        active_count = sum(1 for btn in self.motor_buttons if btn.assigned_group is not None)
+        if active_count == 0:
+            return
+
+        coeffs, omega_per_motor, phase_radians = self.generate_fourier_coefficients()
+
+        active_groups = [g for g in self.groups if len(g.motors) > 0]
+        value_max = max(
+            g.dc_value if g.signal_type == "Constant DC" else g.amp_max
+            for g in active_groups
+        ) if active_groups else 1.0
+
+        self.param_queue.put({
+            'coeffs': coeffs,
+            'omega_per_motor': omega_per_motor,
+            'phases': phase_radians,
+            'value_max': float(value_max),
+        })
+        print(f"[GUI] Applied group parameters live")
+
     def add_harmonic(self):
         """Add a new harmonic to custom Fourier."""
         row = self.harmonics_table.rowCount()
@@ -877,20 +927,19 @@ class WindWallGUI(QMainWindow):
                     phases[:, harmonic_num] = np.deg2rad(phase_deg)
             return coeffs, phases
         
-        # Signal swings from 0 to (amp_max - amp_min).
-        # amp_min is applied as a PWM floor in the flight loop (only when signal > 0),
-        # so the trough always hits 0 → motor stops, and the peak reaches amp_max speed.
+        # Signal is encoded with absolute speed values: trough = amp_min, peak = amp_max.
+        # The flight loop does: pwm = PWM_MIN_RUNNING + signal × (PWM_MAX − PWM_MIN_RUNNING)
+        # so a signal value of 0.5 always means 50% of the running range, regardless of mode.
         swing = amp_max - amp_min
         amplitude = swing / 2.0
-        dc_offset = swing / 2.0
+        dc_offset = (amp_min + amp_max) / 2.0   # absolute midpoint, not relative to 0
 
-        # When amp_min = 0, the trough must reliably go below 0 so the flight loop
-        # snaps to PWM_MIN (1000 µs). Two effects prevent this without a margin:
-        #   - Sine wave: floating-point noise leaves trough at +1e-10 instead of 0
-        #   - Square wave: Gibbs phenomenon keeps the Fourier minimum ~4.5% above 0
-        # Subtracting a trough margin shifts dc_offset just below amplitude so the
-        # SignalGenerator clips the negative trough to 0.0, and the flight loop
-        # condition (signal <= 0 AND amp_min <= 0) reliably fires → 1000 µs.
+        # When amp_min = 0, the trough lands exactly at 0.  Two effects prevent the
+        # flight loop condition (signal <= 0 → PWM_MIN) from reliably firing:
+        #   - Sine: floating-point noise leaves trough at +1e-10 instead of 0
+        #   - Square: Gibbs phenomenon keeps the Fourier minimum ~4.5% above 0
+        # Subtracting a small trough margin pushes dc_offset just below amplitude so
+        # the SignalGenerator clips the trough to 0.0, and the flight loop idles.
         if amp_min <= 0.0 and swing > 0.0:
             if signal_type == "Square Wave":
                 trough_margin = 0.06 * swing  # overcome Gibbs (~4.5% of amplitude)
@@ -928,7 +977,14 @@ class WindWallGUI(QMainWindow):
         return coeffs, np.zeros((NUM_MOTORS, n_terms))  # zero phases for non-custom types
 
     def generate_fourier_coefficients(self):
-        """Generate combined Fourier coefficients, per-motor omega, amp_min, and phase arrays."""
+        """Generate combined Fourier coefficients, per-motor omega, and phase arrays.
+
+        amp_min and amp_max are encoded directly into the DC offset of each group's
+        coefficients — the signal value at any moment represents the absolute speed
+        fraction (0.0–1.0).  The flight loop maps it as:
+            pwm = PWM_MIN_RUNNING + signal × (PWM_MAX − PWM_MIN_RUNNING)
+        No separate amp_min offset is needed in the flight loop.
+        """
         # Determine max number of terms needed
         max_terms = max((g.fourier_terms for g in self.groups), default=7)
 
@@ -936,7 +992,6 @@ class WindWallGUI(QMainWindow):
         final_coeffs = np.zeros((NUM_MOTORS, max_terms))
         final_phases = np.zeros((NUM_MOTORS, max_terms))
         omega_per_motor = np.full(NUM_MOTORS, 2.0 * np.pi * BASE_FREQUENCY, dtype=float)
-        amp_min_per_motor = np.zeros(NUM_MOTORS, dtype=float)
 
         # Process each group
         for group in self.groups:
@@ -946,20 +1001,19 @@ class WindWallGUI(QMainWindow):
             group_coeffs, group_phases = self.generate_group_coefficients(group)
             group_omega = 2.0 * np.pi * (1.0 / group.period) if group.period > 0 else 2.0 * np.pi * BASE_FREQUENCY
 
-            # Assign coefficients, phases, omega, and amp_min to motors in this group
+            # Assign coefficients, phases, and omega to motors in this group
             for motor_id in group.motors:
                 terms_to_copy = min(group_coeffs.shape[1], max_terms)
                 final_coeffs[motor_id, :terms_to_copy] = group_coeffs[motor_id, :terms_to_copy]
                 final_phases[motor_id, :terms_to_copy] = group_phases[motor_id, :terms_to_copy]
                 omega_per_motor[motor_id] = group_omega
-                amp_min_per_motor[motor_id] = group.amp_min
 
-        # Motors not in any group get zero coefficients (PWM_MIN); amp_min stays 0
+        # Motors not in any group get zero coefficients → signal=0 → PWM_MIN (idle)
         for i, btn in enumerate(self.motor_buttons):
             if btn.assigned_group is None:
                 final_coeffs[i, :] = 0.0
 
-        return final_coeffs, omega_per_motor, amp_min_per_motor, final_phases
+        return final_coeffs, omega_per_motor, final_phases
 
     # ------------------------------------------------------------------
     # Preset save / load
@@ -1177,7 +1231,7 @@ class WindWallGUI(QMainWindow):
                 QMessageBox.warning(self, "No Signal File",
                                     "Please load a signal file (.npy or .csv) first.")
                 return
-            coeffs, omega_per_motor, amp_min_per_motor, phase_radians = None, None, None, None
+            coeffs, omega_per_motor, phase_radians = None, None, None
             signal_table = self.direct_signal_table
             signal_rate = self.direct_signal_rate_hz
         else:
@@ -1186,11 +1240,14 @@ class WindWallGUI(QMainWindow):
                 QMessageBox.warning(self, "No Motors Assigned",
                                     "Please assign at least one motor to a group!")
                 return
-            coeffs, omega_per_motor, amp_min_per_motor, phase_radians = self.generate_fourier_coefficients()
+            coeffs, omega_per_motor, phase_radians = self.generate_fourier_coefficients()
             signal_table, signal_rate = None, None
 
         # Reset experiment timeline for fresh start
         self.experiment_start_time = None
+
+        # Create queue for live parameter updates (GUI → flight_loop)
+        self.param_queue = multiprocessing.Queue()
 
         # Update UI
         self.experiment_running = True
@@ -1208,9 +1265,12 @@ class WindWallGUI(QMainWindow):
         """)
 
         # Disable group/signal configuration during experiment
+        # (Apply Group Live button stays enabled to allow mid-run parameter pushes)
         self.groups_list.setEnabled(False)
         self.signal_type.setEnabled(False)
         self.signal_mode.setEnabled(False)
+        if self.signal_mode.currentText() != "Direct (file)":
+            self.apply_group_btn.setEnabled(True)
 
         # Start live monitoring
         self.start_live_monitor()
@@ -1219,12 +1279,12 @@ class WindWallGUI(QMainWindow):
         import threading
         experiment_thread = threading.Thread(
             target=self.run_experiment_thread,
-            args=(coeffs, omega_per_motor, amp_min_per_motor, phase_radians, signal_table, signal_rate)
+            args=(coeffs, omega_per_motor, phase_radians, signal_table, signal_rate)
         )
         experiment_thread.daemon = True
         experiment_thread.start()
     
-    def run_experiment_thread(self, coeffs, omega_per_motor, amp_min_per_motor,
+    def run_experiment_thread(self, coeffs, omega_per_motor,
                               phase_radians=None, signal_table=None, signal_sample_rate_hz=None):
         """Run the experiment (called in separate thread)."""
         import json
@@ -1260,6 +1320,7 @@ class WindWallGUI(QMainWindow):
                 slew_limit_override=slew_limit_override,
                 duration_s=float(duration),
                 log_stem=log_stem,
+                param_queue=self.param_queue,
             )
             if signal_table is not None:
                 flight_kwargs['signal_table'] = signal_table
@@ -1268,16 +1329,18 @@ class WindWallGUI(QMainWindow):
                 flight_kwargs['fourier_coeffs'] = coeffs
                 flight_kwargs['base_freq'] = BASE_FREQUENCY
                 flight_kwargs['omega_per_motor'] = omega_per_motor
-                flight_kwargs['amp_min_per_motor'] = amp_min_per_motor
                 if phase_radians is not None:
                     flight_kwargs['phase_radians'] = phase_radians
-                # Signal range is now [0, amp_max - amp_min] per group.
-                # value_min must be 0.0 so unassigned motors (signal=0) stay at
-                # PWM_MIN instead of being clipped up to a non-zero floor.
+                # Signal values are absolute speed fractions [0, 1].
+                # value_min = 0 so unassigned motors (signal=0) idle at PWM_MIN.
+                # value_max = highest signal peak across all active groups.
                 active_groups = [g for g in self.groups if len(g.motors) > 0]
                 if active_groups:
                     flight_kwargs['value_min'] = 0.0
-                    flight_kwargs['value_max'] = max(g.amp_max - g.amp_min for g in active_groups)
+                    flight_kwargs['value_max'] = max(
+                        g.dc_value if g.signal_type == "Constant DC" else g.amp_max
+                        for g in active_groups
+                    )
                 else:
                     flight_kwargs['value_min'] = 0.0
                     flight_kwargs['value_max'] = 1.0
@@ -1492,6 +1555,8 @@ class WindWallGUI(QMainWindow):
         self.groups_list.setEnabled(True)
         self.signal_type.setEnabled(True)
         self.signal_mode.setEnabled(True)
+        self.apply_group_btn.setEnabled(False)
+        self.param_queue = None
         
         QMessageBox.information(self, "Experiment Complete", 
                               "Experiment finished! Check the logs folder for data.")

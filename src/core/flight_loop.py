@@ -29,7 +29,6 @@ def flight_loop(
     start_time_offset: float = 0.0,
     value_min: float | None = None,
     value_max: float | None = None,
-    amp_min_per_motor: np.ndarray | None = None,
     duration_s: float | None = None,
     log_stem: str | None = None,
     enable_logging: bool = True,
@@ -37,6 +36,7 @@ def flight_loop(
     slew_limit_override: float | None = None,
     signal_table: np.ndarray | None = None,
     signal_sample_rate_hz: float | None = None,
+    param_queue=None,
 ) -> None: # type: ignore
     """
     Main flight control loop running at UPDATE_RATE_HZ.
@@ -94,11 +94,6 @@ def flight_loop(
         else:
             raise ValueError("Provide either fourier_coeffs or signal_table to flight_loop")
         
-        # amp_min floor applied per-motor when signal > 0
-        _amp_min = (amp_min_per_motor.astype(np.float64)
-                    if amp_min_per_motor is not None
-                    else np.zeros(NUM_MOTORS, dtype=np.float64))
-
         # Attach to shared memory buffer
         shared_buffer = MotorStateBuffer(create=False)
         
@@ -126,13 +121,13 @@ def flight_loop(
         # State tracking — seed from signal at t=0 so there is no forced ramp from PWM_CENTER
         _init_signal = signal_gen.get_flow_field(0.0)
         _init_pos = np.maximum(_init_signal, 0.0)
-        _init_active = PWM_MIN_RUNNING + (_amp_min + _init_pos) * (PWM_MAX - PWM_MIN_RUNNING)
+        _init_active = PWM_MIN_RUNNING + _init_pos * (PWM_MAX - PWM_MIN_RUNNING)
         previous_pwm = np.where(
-            (_init_signal <= 0.0) & (_amp_min <= 0.0),
+            _init_signal <= 0.0,
             float(PWM_MIN),
             _init_active
         )
-        previous_pwm = np.clip(previous_pwm, PWM_MIN, PWM_MAX)  # guard: amp_min+signal>1 can exceed PWM_MAX
+        previous_pwm = np.clip(previous_pwm, PWM_MIN, PWM_MAX)
         active_slew_limit = (slew_limit_override if slew_limit_override is not None else MAX_PWM_SLEW_LIMIT) * LOOP_TIME_MS
         frame_count = 0
 
@@ -170,17 +165,16 @@ def flight_loop(
             signal_raw = signal_gen.get_flow_field(frame_time)
             
             # --- Step 2: Map signal to PWM range ---
-            # Two cases:
-            #   amp_min == 0  (unassigned or user wants full stop):
-            #       signal <= 0  →  PWM_MIN (1000 µs)
-            #       signal >  0  →  linear from PWM_MIN_RUNNING to PWM_MAX
-            #   amp_min >  0  (assigned motor with speed floor):
-            #       always       →  PWM_MIN_RUNNING + (amp_min + signal) * range
-            #       floor = PWM_MIN_RUNNING + amp_min * range — no hard jump
+            # signal encodes absolute speed fraction [0, 1] — already includes any
+            # speed floor baked into the Fourier coefficients (dc_offset = midpoint
+            # of [amp_min, amp_max]).  Direct mapping:
+            #   signal <= 0  →  PWM_MIN (idle / armed)
+            #   signal >  0  →  PWM_MIN_RUNNING + signal × (PWM_MAX − PWM_MIN_RUNNING)
+            # Example: signal=0.5, PWM_MIN_RUNNING=1000, PWM_MAX=2000 → 1500 µs
             _signal_pos = np.maximum(signal_raw, 0.0)
-            pwm_active = PWM_MIN_RUNNING + (_amp_min + _signal_pos) * (PWM_MAX - PWM_MIN_RUNNING)
+            pwm_active = PWM_MIN_RUNNING + _signal_pos * (PWM_MAX - PWM_MIN_RUNNING)
             pwm_target = np.where(
-                (signal_raw <= 0.0) & (_amp_min <= 0.0),
+                signal_raw <= 0.0,
                 float(PWM_MIN),
                 pwm_active
             )
@@ -203,6 +197,22 @@ def flight_loop(
 
             # --- Step 5: Update shared memory ---
             shared_buffer.set_pwm(pwm_safe)
+
+            # --- Step 5b: Apply live parameter updates from GUI ---
+            # Drain the queue and apply the most recent update (skip stale ones).
+            if param_queue is not None:
+                _update = None
+                while True:
+                    try:
+                        _update = param_queue.get_nowait()
+                    except Exception:
+                        break
+                if _update is not None:
+                    signal_gen.coeffs = _update['coeffs'].astype(np.float64)
+                    signal_gen.n_terms = signal_gen.coeffs.shape[1]
+                    signal_gen.omega_per_motor = _update['omega_per_motor'].astype(np.float64)
+                    signal_gen.phases = _update['phases'].astype(np.float64)
+                    signal_gen.value_max = float(_update['value_max'])
 
             # --- Step 6: Log to CSV (if enabled) ---
             if enable_logging and csv_writer and frame_count % log_interval_frames == 0:

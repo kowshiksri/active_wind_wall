@@ -99,7 +99,6 @@ def main(
             start_time_offset=start_delay_s,
             value_min=value_min,
             value_max=value_max,
-            amp_min_per_motor=None,
             duration_s=experiment_duration_s,
             enable_logging=enable_logging,
         ),
